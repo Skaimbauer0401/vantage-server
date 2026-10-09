@@ -650,6 +650,18 @@ fn unary(op: UnaryOp, v: f32) -> f32 {
     }
 }
 
+/// `unary` over a slice, with the operation chosen once so each loop can vectorize.
+fn unary_slice(op: UnaryOp, out: &mut [f32]) {
+    match op {
+        UnaryOp::Square => out.iter_mut().for_each(|v| *v = unary(UnaryOp::Square, *v)),
+        UnaryOp::Cube => out.iter_mut().for_each(|v| *v = unary(UnaryOp::Cube, *v)),
+        UnaryOp::Squeeze => out.iter_mut().for_each(|v| *v = unary(UnaryOp::Squeeze, *v)),
+        UnaryOp::Abs => out.iter_mut().for_each(|v| *v = unary(UnaryOp::Abs, *v)),
+        UnaryOp::Negate => out.iter_mut().for_each(|v| *v = unary(UnaryOp::Negate, *v)),
+        other => out.iter_mut().for_each(|v| *v = unary(other, *v)),
+    }
+}
+
 fn gradient_compute(kind: GradientKind, from_value: f32, factor: f32, coordinate: i32) -> f32 {
     match kind {
         GradientKind::Clamped { from, min, max } => {
@@ -906,7 +918,7 @@ impl<'g> Context<'g> {
             }
             Node::Unary(op, input) => {
                 self.sample_volume(*input, out, vol);
-                out.iter_mut().for_each(|v| *v = unary(*op, *v));
+                unary_slice(*op, out);
             }
             Node::Clamp(input, min, max) => {
                 self.sample_volume(*input, out, vol);
