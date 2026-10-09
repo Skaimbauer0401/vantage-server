@@ -36,6 +36,7 @@ public final class Benchmarks {
 	/** Nanoseconds spent in ThreadedLevelLightEngine.runUpdate (serial per dimension). */
 	public static final java.util.concurrent.atomic.AtomicLong LIGHT_NANOS = new java.util.concurrent.atomic.AtomicLong();
 
+
 	private static boolean running;
 
 	/** Samples the worker pool every 2 ms while a chunk benchmark runs. */
@@ -159,6 +160,7 @@ public final class Benchmarks {
 
 		long start = System.nanoTime();
 		LIGHT_NANOS.set(0);
+
 		PoolSampler sampler = new PoolSampler();
 		sampler.start();
 		cache.addTicketAndLoadWithRadius(TicketType.FORCED, pos, radius).whenComplete((ignored, error) -> server.execute(() -> {
@@ -188,8 +190,8 @@ public final class Benchmarks {
 					TerrainFill.VERIFY ? String.format(Locale.ROOT, ", verify: %d compared, %d differ",
 							TerrainFill.VERIFIED.get(), TerrainFill.MISMATCHED.get()) : ""));
 			if (FastLight.VERIFY) {
-				report(source, String.format(Locale.ROOT, "[bench] fast light verify: %d lookups compared, %d differ",
-						FastLight.CHECKED.get(), FastLight.MISMATCHED.get()));
+				report(source, String.format(Locale.ROOT, "[bench] fast light verify: %d checks %s, %d differ",
+						FastLight.CHECKED.get(), FastLight.BY_KIND, FastLight.MISMATCHED.get()));
 			}
 			if (ChunkIo.VERIFY) {
 				report(source, String.format(Locale.ROOT, "[bench] chunk io verify: %d containers compared, %d mismatches",

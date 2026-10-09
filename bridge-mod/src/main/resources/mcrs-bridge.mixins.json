@@ -9,6 +9,7 @@
 		"LevelChunkSectionAccessor",
 		"LayerLightSectionStorageAccessor",
 		"LevelChunkSectionMixin",
+		"LightEngineAccessor",
 		"LightEngineMixin",
 		"MinecraftServerMixin",
 		"NoiseBasedChunkGeneratorMixin",
@@ -17,6 +18,8 @@
 		"PalettedContainerFactoryMixin",
 		"SerializableChunkDataMixin",
 		"SkyLightEngineInvoker",
+		"SkyLightSectionStorageInvoker",
+		"SkyLightSourcesMixin",
 		"StructureTemplatePaletteMixin",
 		"ThreadedLevelLightEngineMixin"
 	],
