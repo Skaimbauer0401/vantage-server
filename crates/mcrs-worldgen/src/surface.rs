@@ -471,12 +471,14 @@ struct ColumnZoom {
     cache: Vec<Option<[[f64; 3]; 4]>>,
     /// Per parent quart Y: Some(id) if all 8 corner noise biomes are `id`, None if mixed.
     uniform: Vec<Option<Option<u32>>>,
+    /// Per parent quart Y: the 8 corner noise biomes the zoom picks from.
+    candidates: Vec<Option<[u32; 8]>>,
     base_y: i32,
 }
 
 impl ColumnZoom {
     fn new() -> ColumnZoom {
-        ColumnZoom { x: i32::MIN, z: i32::MIN, cache: Vec::new(), uniform: Vec::new(), base_y: 0 }
+        ColumnZoom { x: i32::MIN, z: i32::MIN, cache: Vec::new(), uniform: Vec::new(), candidates: Vec::new(), base_y: 0 }
     }
 
     fn reset(&mut self, x: i32, z: i32, min_y: i32, max_y: i32) {
@@ -488,6 +490,31 @@ impl ColumnZoom {
         self.cache.resize(len, None);
         self.uniform.clear();
         self.uniform.resize(len, None);
+        self.candidates.clear();
+        self.candidates.resize(len, None);
+    }
+
+    /// Whether `test` holds for the zoomed biome at (x, y, z), when that's decided without
+    /// zooming: the zoom always picks one of the 8 surrounding noise biomes, so if `test`
+    /// is the same for all of them, that is the answer. None if they disagree.
+    fn same_for_candidates(&mut self, area: &BiomeArea, x: i32, y: i32, z: i32, test: impl Fn(u32) -> bool) -> Option<bool> {
+        if x != self.x || z != self.z {
+            return None;
+        }
+        let (px, py, pz) = ((x - 2) >> 2, (y - 2) >> 2, (z - 2) >> 2);
+        let slot = (py - self.base_y) as usize;
+        if slot >= self.candidates.len() {
+            return None;
+        }
+        let ids = *self.candidates[slot].get_or_insert_with(|| {
+            let mut ids = [0u32; 8];
+            for (i, id) in ids.iter_mut().enumerate() {
+                *id = area.noise_biome(px + (i >> 2 & 1) as i32, py + (i >> 1 & 1) as i32, pz + (i & 1) as i32);
+            }
+            ids
+        });
+        let first = test(ids[0]);
+        ids[1..].iter().all(|&id| test(id) == first).then_some(first)
     }
 
     fn biome(&mut self, seed: i64, area: &BiomeArea, x: i32, y: i32, z: i32) -> u32 {
@@ -748,8 +775,14 @@ impl Run<'_, '_> {
     fn test(&mut self, c: &Cond) -> bool {
         match c {
             Cond::Biome(bits) => {
-                let b = self.biome() as usize;
-                bits.get(b / 64).is_some_and(|w| w & (1 << (b % 64)) != 0)
+                let contains = |b: u32| bits.get(b as usize / 64).is_some_and(|w| w & (1 << (b % 64)) != 0);
+                if self.biome.is_none() {
+                    if let Some(known) = self.zoom.same_for_candidates(self.biomes, self.block_x, self.block_y, self.block_z, contains) {
+                        return known;
+                    }
+                }
+                let b = self.biome();
+                contains(b)
             }
             Cond::NoiseThreshold { noise, min, max, is3d } => {
                 let value = if *is3d {
