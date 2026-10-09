@@ -14,7 +14,7 @@ import java.nio.charset.StandardCharsets;
  * is bound as a Panama FFM downcall. Keep the layout in sync with the Rust struct.
  */
 public final class NativeBridge {
-	public static final int ABI_VERSION = 4;
+	public static final int ABI_VERSION = 5;
 
 	private static final String MAGIC = "MCRSBRDG";
 	private static final long HEADER_SIZE = 16;
@@ -68,7 +68,7 @@ public final class NativeBridge {
 				FunctionDescriptor.of(ValueLayout.JAVA_LONG, ValueLayout.ADDRESS, ValueLayout.JAVA_LONG));
 		wgFill = linker.downcallHandle(fn(table, 6), FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_LONG,
 				ValueLayout.JAVA_INT, ValueLayout.JAVA_INT, ValueLayout.JAVA_INT, ValueLayout.JAVA_INT, ValueLayout.ADDRESS,
-				ValueLayout.ADDRESS));
+				ValueLayout.JAVA_LONG, ValueLayout.ADDRESS, ValueLayout.ADDRESS));
 		return true;
 	}
 
@@ -157,11 +157,12 @@ public final class NativeBridge {
 	 * Fills a chunk in Rust. Returns the result buffer (caller must {@link #free} it), or
 	 * null if Rust failed and vanilla should fill the chunk.
 	 */
-	public static MemorySegment wgFill(long handle, int chunkX, int chunkZ, int minY, int height) {
+	public static MemorySegment wgFill(long handle, int chunkX, int chunkZ, int minY, int height, int[] beard) {
 		try (Arena arena = Arena.ofConfined()) {
 			MemorySegment out = arena.allocate(ValueLayout.ADDRESS);
 			MemorySegment outLen = arena.allocate(ValueLayout.JAVA_LONG);
-			int result = (int) wgFill.invokeExact(handle, chunkX, chunkZ, minY, height, out, outLen);
+			MemorySegment beardData = arena.allocateFrom(ValueLayout.JAVA_INT, beard);
+			int result = (int) wgFill.invokeExact(handle, chunkX, chunkZ, minY, height, beardData, (long) beard.length, out, outLen);
 			if (result != 1) {
 				return null;
 			}

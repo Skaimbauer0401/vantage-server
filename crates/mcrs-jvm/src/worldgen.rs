@@ -8,12 +8,14 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
 use std::time::Instant;
 
+use mcrs_worldgen::density::{Beard, Rigid, TerrainAdjustment};
 use mcrs_worldgen::fill::{FillOut, Generator};
 
 static GENERATORS: RwLock<Vec<Arc<Generator>>> = RwLock::new(Vec::new());
 
 static CHUNKS: AtomicU64 = AtomicU64::new(0);
 static NANOS: AtomicU64 = AtomicU64::new(0);
+static STRUCTURE_CHUNKS: AtomicU64 = AtomicU64::new(0);
 
 /// `long wg_load(u8* json, size_t len)`: 0 if the export can't be handled.
 pub extern "C" fn wg_load(json: *const u8, len: usize) -> i64 {
@@ -47,13 +49,47 @@ pub extern "C" fn wg_load(json: *const u8, len: usize) -> i64 {
     result.unwrap_or(0)
 }
 
-/// `int wg_fill(long handle, int chunkX, int chunkZ, int minY, int height, u8** out, size_t* outLen)`
+/// Decodes the Java side's beardifier ints: `hasBox, box[6], pieceCount,
+/// pieces[8 each: min xyz, max xyz, adjustment, groundLevelDelta], junctionCount, junctions[3 each]`.
+fn parse_beard(ints: &[i32]) -> Option<Beard> {
+    let mut it = ints.iter().copied();
+    let mut next = || it.next();
+    let mut beard = Beard::default();
+    let has_box = next()?;
+    let b = [next()?, next()?, next()?, next()?, next()?, next()?];
+    if has_box == 1 {
+        beard.affected = Some(([b[0], b[1], b[2]], [b[3], b[4], b[5]]));
+    }
+    for _ in 0..next()? {
+        let min = [next()?, next()?, next()?];
+        let max = [next()?, next()?, next()?];
+        let adjustment = match next()? {
+            0 => TerrainAdjustment::None,
+            1 => TerrainAdjustment::Bury,
+            2 => TerrainAdjustment::BeardThin,
+            3 => TerrainAdjustment::BeardBox,
+            4 => TerrainAdjustment::Encapsulate,
+            _ => return None,
+        };
+        beard.pieces.push(Rigid { min, max, adjustment, ground_level_delta: next()? });
+    }
+    for _ in 0..next()? {
+        beard.junctions.push([next()?, next()?, next()?]);
+    }
+    Some(beard)
+}
+
+/// `int wg_fill(long handle, int chunkX, int chunkZ, int minY, int height,
+///     i32* beard, size_t beardLen, u8** out, size_t* outLen)`
+#[allow(clippy::too_many_arguments)]
 pub extern "C" fn wg_fill(
     handle: i64,
     chunk_x: i32,
     chunk_z: i32,
     min_y: i32,
     height: i32,
+    beard: *const i32,
+    beard_len: usize,
     out: *mut *mut u8,
     out_len: *mut usize,
 ) -> i32 {
@@ -65,11 +101,19 @@ pub extern "C" fn wg_fill(
                 None => return -1,
             }
         };
+        let beard_ints = if beard_len == 0 { &[][..] } else { unsafe { std::slice::from_raw_parts(beard, beard_len) } };
+        let Some(beard) = parse_beard(beard_ints) else {
+            return -3;
+        };
+        if beard.affected.is_some() {
+            STRUCTURE_CHUNKS.fetch_add(1, Ordering::Relaxed);
+        }
         let start = Instant::now();
-        let filled = generator.fill(chunk_x, chunk_z, min_y, height);
+        let filled = generator.fill(chunk_x, chunk_z, min_y, height, beard);
         NANOS.fetch_add(start.elapsed().as_nanos() as u64, Ordering::Relaxed);
         CHUNKS.fetch_add(1, Ordering::Relaxed);
         let bytes = write_fill(&filled).into_boxed_slice();
+        mcrs_worldgen::density::recycle(filled.cache.into_iter().map(|c| c.buffer));
         unsafe {
             *out_len = bytes.len();
             *out = Box::into_raw(bytes) as *mut u8;
@@ -214,10 +258,11 @@ fn write_fill(f: &FillOut) -> Vec<u8> {
 pub fn report_stats() {
     let chunks = CHUNKS.swap(0, Ordering::Relaxed);
     let nanos = NANOS.swap(0, Ordering::Relaxed);
+    let structures = STRUCTURE_CHUNKS.swap(0, Ordering::Relaxed);
     if chunks > 0 {
         tracing::info!(
             target: "mcrs::worldgen",
-            "filled {chunks} chunks in Rust, {:.2} ms each (per thread)",
+            "filled {chunks} chunks in Rust ({structures} with structure terrain adaptation), {:.2} ms each (per thread)",
             nanos as f64 / chunks as f64 / 1e6
         );
     }

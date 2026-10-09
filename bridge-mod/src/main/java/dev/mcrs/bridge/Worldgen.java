@@ -84,7 +84,26 @@ public final class Worldgen {
 			states.add(Integer.toString(Block.getId(state)), stateInfo(state));
 		}
 		json.add("states", states);
+		json.add("beard_kernel", beardKernel());
 		return json;
+	}
+
+	/** {@code Beardifier.BEARD_KERNEL} as float bits ({@code {"fs": [...]}}). */
+	private static JsonObject beardKernel() {
+		try {
+			var field = net.minecraft.world.level.levelgen.Beardifier.class.getDeclaredField("BEARD_KERNEL");
+			field.setAccessible(true);
+			float[] kernel = (float[]) field.get(null);
+			com.google.gson.JsonArray values = new com.google.gson.JsonArray();
+			for (float f : kernel) {
+				values.add(Float.floatToRawIntBits(f));
+			}
+			JsonObject json = new JsonObject();
+			json.add("fs", values);
+			return json;
+		} catch (ReflectiveOperationException e) {
+			throw new WorldgenExport.Unsupported("Beardifier.BEARD_KERNEL: " + e);
+		}
 	}
 
 	/** What terrain filling needs to know about a block state, from vanilla's own predicates. */

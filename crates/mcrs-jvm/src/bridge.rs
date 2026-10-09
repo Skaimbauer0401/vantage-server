@@ -9,7 +9,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 pub const MAGIC: u64 = u64::from_le_bytes(*b"MCRSBRDG");
-pub const ABI_VERSION: u32 = 4;
+pub const ABI_VERSION: u32 = 5;
 
 #[repr(C)]
 pub struct BridgeTable {
@@ -29,7 +29,7 @@ pub struct BridgeTable {
     /// See [`crate::worldgen::wg_load`].
     pub wg_load: extern "C" fn(*const u8, usize) -> i64,
     /// See [`crate::worldgen::wg_fill`].
-    pub wg_fill: extern "C" fn(i64, i32, i32, i32, i32, *mut *mut u8, *mut usize) -> i32,
+    pub wg_fill: extern "C" fn(i64, i32, i32, i32, i32, *const i32, usize, *mut *mut u8, *mut usize) -> i32,
 }
 
 pub static BRIDGE: BridgeTable = BridgeTable {

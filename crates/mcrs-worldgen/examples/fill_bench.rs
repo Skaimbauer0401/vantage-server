@@ -14,13 +14,13 @@ fn main() {
     let (min_y, height) = (-64, 384);
     // Warm up, then measure a 10x10 area on one thread.
     for i in 0..10 {
-        generator.fill(1000 + i, 1000, min_y, height);
+        generator.fill(1000 + i, 1000, min_y, height, Default::default());
     }
     let start = Instant::now();
     let mut blocks = 0usize;
     for x in 0..10 {
         for z in 0..10 {
-            let out = generator.fill(x * 7 - 300, z * 5 + 200, min_y, height);
+            let out = generator.fill(x * 7 - 300, z * 5 + 200, min_y, height, Default::default());
             blocks += out.sections.iter().filter(|s| !s.palette.is_empty()).count();
         }
     }

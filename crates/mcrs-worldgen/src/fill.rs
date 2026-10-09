@@ -11,7 +11,7 @@ use std::collections::HashMap;
 
 use serde_json::Value;
 
-use crate::density::{CacheCell, Context, Graph, LoadError, NodeId};
+use crate::density::{Beard, CacheCell, Context, Graph, LoadError, NodeId};
 use crate::noise::{floor, DensityVolume};
 use crate::random::{
     LegacyPositionalFactory, PositionalRandomFactory, RandomSource, XoroshiroPositionalFactory,
@@ -614,9 +614,10 @@ pub struct AquiferState {
 
 impl Generator {
     /// `doFill` for the chunk at `chunk_x, chunk_z` over `[min_y, min_y + height)`.
-    pub fn fill(&self, chunk_x: i32, chunk_z: i32, min_y: i32, height: i32) -> FillOut {
+    pub fn fill(&self, chunk_x: i32, chunk_z: i32, min_y: i32, height: i32, beard: Beard) -> FillOut {
         let volume = DensityVolume::new([16, height, 16], [chunk_x << 4, min_y, chunk_z << 4], [1, 1, 1]);
         let mut ctx = Context::new(&self.graph);
+        ctx.beard = beard;
         // NoiseChunk's constructor builds the aquifer (sampling surface levels) first.
         let mut aquifer = match (self.aquifer, self.aquifer_random) {
             (Some(nodes), Some(random)) => Some(Aquifer::new(self, nodes, random, &mut ctx, &volume)),
@@ -625,7 +626,8 @@ impl Generator {
         let density = ctx.sample_volume_new(self.final_density, &volume);
 
         let section_count = (height / 16) as usize;
-        let mut blocks: Vec<Vec<u32>> = vec![Vec::new(); section_count];
+        // Per section: palette indices (vanilla's palette starts with the initial air).
+        let mut blocks: Vec<Vec<u8>> = vec![Vec::new(); section_count];
         let mut palettes: Vec<Vec<u32>> = vec![Vec::new(); section_count];
         let mut out = FillOut {
             sections: Vec::new(),
@@ -635,6 +637,7 @@ impl Generator {
             cache: Vec::new(),
             aquifer: None,
         };
+        let mut last_info = (u32::MAX, StateInfo::default());
 
         for z in 0..16 {
             let bz = volume.block_z(z);
@@ -657,14 +660,23 @@ impl Generator {
                     }
                     let section = (y / 16) as usize;
                     if blocks[section].is_empty() {
-                        blocks[section] = vec![self.air; 4096];
+                        blocks[section] = vec![0u8; 4096];
                         palettes[section] = vec![self.air];
                     }
-                    blocks[section][((y & 15) * 256 + z * 16 + x) as usize] = state;
-                    if !palettes[section].contains(&state) {
-                        palettes[section].push(state);
+                    let palette = &mut palettes[section];
+                    let index = match palette.iter().position(|s| *s == state) {
+                        Some(i) => i,
+                        None => {
+                            assert!(palette.len() < 256, "terrain fill produced more than 256 states in a section");
+                            palette.push(state);
+                            palette.len() - 1
+                        }
+                    };
+                    blocks[section][((y & 15) * 256 + z * 16 + x) as usize] = index as u8;
+                    if last_info.0 != state {
+                        last_info = (state, self.info(state));
                     }
-                    let info = self.info(state);
+                    let info = last_info.1;
                     if out.world_surface[column].is_none() && info.world_surface {
                         out.world_surface[column] = Some((by, state));
                     }
@@ -683,7 +695,7 @@ impl Generator {
             .zip(&palettes)
             .map(|(b, p)| if b.is_empty() { SectionOut::default() } else { self.pack_section(b, p) })
             .collect();
-        out.cache = ctx.cells;
+        out.cache = std::mem::take(&mut ctx.cells);
         out.aquifer = aquifer.map(|a| AquiferState {
             status: a.cache,
             location: a.location_cache,
@@ -713,20 +725,26 @@ impl Generator {
         }
     }
 
-    fn pack_section(&self, blocks: &[u32], palette: &[u32]) -> SectionOut {
+    fn pack_section(&self, indices: &[u8], palette: &[u32]) -> SectionOut {
         // Vanilla's block configurations: 4-bit linear up to 16 entries, 5..8-bit hashmap.
-        assert!(palette.len() <= 256, "terrain fill produced more than 256 states in a section");
         let bits = (usize::BITS - (palette.len() - 1).leading_zeros()).max(4) as usize;
         let per_long = 64 / bits;
         let mut data = vec![0u64; 4096usize.div_ceil(per_long)];
+        let mut histogram = [0i32; 256];
+        for (word, chunk) in data.iter_mut().zip(indices.chunks(per_long)) {
+            let mut w = 0u64;
+            for (i, &index) in chunk.iter().enumerate() {
+                w |= (index as u64) << (i * bits);
+                histogram[index as usize] += 1;
+            }
+            *word = w;
+        }
         let mut counts = [0i32; 4];
-        let index_of: HashMap<u32, u64> = palette.iter().enumerate().map(|(i, s)| (*s, i as u64)).collect();
-        for (i, state) in blocks.iter().enumerate() {
-            data[i / per_long] |= index_of[state] << ((i % per_long) * bits);
+        for (state, n) in palette.iter().zip(histogram) {
             let info = self.info(*state);
             for (c, on) in counts.iter_mut().zip(info.counts) {
                 if on {
-                    *c += 1;
+                    *c += n;
                 }
             }
         }

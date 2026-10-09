@@ -126,9 +126,7 @@ public final class TerrainFill {
 		}
 		SamplerContext context = Reflect.context(noiseChunk);
 		Beardifier beardifier = context.getField(Beardifier.CONTEXT_KEY);
-		if (beardifier != null && Reflect.affectedBox(beardifier) != null) {
-			return null;
-		}
+		int[] beard = beardifier == null ? new int[] {0, 0, 0, 0, 0, 0, 0, 0, 0} : Reflect.beard(beardifier);
 		if (context.getField(Blender.CONTEXT_KEY) != null) {
 			return null;
 		}
@@ -141,7 +139,7 @@ public final class TerrainFill {
 			}
 		}
 		ChunkPos pos = chunk.getPos();
-		MemorySegment buffer = NativeBridge.wgFill(handle, pos.x(), pos.z(), volume.minBlockY(), volume.sizeY());
+		MemorySegment buffer = NativeBridge.wgFill(handle, pos.x(), pos.z(), volume.minBlockY(), volume.sizeY(), beard);
 		return buffer == null ? null : new Result(buffer, volume);
 	}
 
@@ -498,8 +496,28 @@ public final class TerrainFill {
 			throw new IllegalStateException("mcrs: no SamplerContext in " + samplers.getClass());
 		}
 
-		static Object affectedBox(Beardifier beardifier) {
-			return get(beardifier, "affectedBox");
+		/** Encodes a Beardifier for Rust; see parse_beard in crates/mcrs-jvm/src/worldgen.rs. */
+		static int[] beard(Beardifier beardifier) {
+			it.unimi.dsi.fastutil.ints.IntArrayList out = new it.unimi.dsi.fastutil.ints.IntArrayList();
+			net.minecraft.world.level.levelgen.structure.BoundingBox box = get(beardifier, "affectedBox");
+			if (box == null) {
+				out.addElements(0, new int[] {0, 0, 0, 0, 0, 0, 0});
+			} else {
+				out.addElements(0, new int[] {1, box.minX(), box.minY(), box.minZ(), box.maxX(), box.maxY(), box.maxZ()});
+			}
+			List<Beardifier.Rigid> pieces = get(beardifier, "pieces");
+			out.add(pieces.size());
+			for (Beardifier.Rigid rigid : pieces) {
+				var b = rigid.box();
+				out.addElements(out.size(), new int[] {b.minX(), b.minY(), b.minZ(), b.maxX(), b.maxY(), b.maxZ(),
+						rigid.terrainAdjustment().ordinal(), rigid.groundLevelDelta()});
+			}
+			List<net.minecraft.world.level.levelgen.structure.pools.JigsawJunction> junctions = get(beardifier, "junctions");
+			out.add(junctions.size());
+			for (var junction : junctions) {
+				out.addElements(out.size(), new int[] {junction.getSourceX(), junction.getSourceGroundY(), junction.getSourceZ()});
+			}
+			return out.toIntArray();
 		}
 
 		static Object cacheCell(SamplerContext context, int id) {

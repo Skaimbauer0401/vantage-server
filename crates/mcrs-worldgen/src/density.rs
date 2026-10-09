@@ -124,6 +124,37 @@ pub enum Node {
     SliceZ(NodeId, i32),
     SliceXz(NodeId, i32, i32),
     Cache { id: usize, input: NodeId },
+    /// `Beardifier` (structure terrain adaptation), per chunk via [`Context::beard`].
+    Beardifier,
+}
+
+/// `TerrainAdjustment`
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TerrainAdjustment {
+    None,
+    Bury,
+    BeardThin,
+    BeardBox,
+    Encapsulate,
+}
+
+/// `Beardifier.Rigid`
+#[derive(Debug, Clone, Copy)]
+pub struct Rigid {
+    pub min: [i32; 3],
+    pub max: [i32; 3],
+    pub adjustment: TerrainAdjustment,
+    pub ground_level_delta: i32,
+}
+
+/// A chunk's `Beardifier`: structure pieces and jigsaw junctions near it.
+#[derive(Debug, Clone, Default)]
+pub struct Beard {
+    pub pieces: Vec<Rigid>,
+    /// `(sourceX, sourceGroundY, sourceZ)`
+    pub junctions: Vec<[i32; 3]>,
+    /// `affectedBox` as min and max corners; `None` for `Beardifier.EMPTY`.
+    pub affected: Option<([i32; 3], [i32; 3])>,
 }
 
 /// A compiled sampler graph for one dimension of one world.
@@ -132,6 +163,8 @@ pub struct Graph {
     pub noises: Vec<Arc<dyn Noise>>,
     pub roots: HashMap<String, NodeId>,
     pub cache_count: usize,
+    /// `Beardifier.BEARD_KERNEL` (24^3 values).
+    pub beard_kernel: Vec<f32>,
 }
 
 #[derive(Debug)]
@@ -278,7 +311,11 @@ impl Graph {
                 // use the fallback; an empty Beardifier also returns exactly 0.
                 "ContextBoundSampler" => {
                     let key = field(field(v, "key")?, "key")?.as_str().unwrap_or("");
-                    if !matches!(key, "blend_alpha" | "blend_offset" | "beardifier") {
+                    if key == "beardifier" {
+                        nodes.push(Node::Beardifier);
+                        continue;
+                    }
+                    if !matches!(key, "blend_alpha" | "blend_offset") {
                         return err(format!("context key {key}"));
                     }
                     nodes.push(nodes.get(n(v, "fallbackSampler")?).cloned().ok_or_else(|| LoadError("fallback order".into()))?);
@@ -433,7 +470,14 @@ impl Graph {
         for (name, id) in field(json, "roots")?.as_object().ok_or_else(|| LoadError("roots".into()))? {
             roots.insert(name.clone(), as_i64(id)? as usize);
         }
-        Ok(Graph { nodes, noises, roots, cache_count })
+        let beard_kernel = match json.get("beard_kernel") {
+            Some(v) => floats(v)?,
+            None => Vec::new(),
+        };
+        if nodes.iter().any(|n| matches!(n, Node::Beardifier)) && beard_kernel.len() != 24 * 24 * 24 {
+            return err("beard kernel missing");
+        }
+        Ok(Graph { nodes, noises, roots, cache_count, beard_kernel })
     }
 
     pub fn root(&self, name: &str) -> Option<NodeId> {
@@ -462,6 +506,31 @@ impl Default for CacheCell {
     }
 }
 
+thread_local! {
+    /// Scratch buffers kept per thread across chunks, so filling doesn't allocate.
+    static POOL: std::cell::RefCell<Vec<Vec<f32>>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// Returns buffers (e.g. cache cells of a finished chunk) to this thread's pool.
+pub fn recycle(buffers: impl IntoIterator<Item = Vec<f32>>) {
+    POOL.with(|p| {
+        let mut pool = p.borrow_mut();
+        for b in buffers {
+            if b.capacity() > 0 && pool.len() < 64 {
+                pool.push(b);
+            }
+        }
+    });
+}
+
+impl Drop for Context<'_> {
+    fn drop(&mut self) {
+        let pool = std::mem::take(&mut self.pool);
+        let cells: Vec<Vec<f32>> = self.cells.iter_mut().map(|c| std::mem::take(&mut c.buffer)).collect();
+        recycle(pool.into_iter().chain(cells));
+    }
+}
+
 /// `SamplerContext` with caches enabled, for one chunk.
 pub struct Context<'g> {
     pub graph: &'g Graph,
@@ -469,6 +538,8 @@ pub struct Context<'g> {
     pool: Vec<Vec<f32>>,
     /// Inclusive nanoseconds and points per node when profiling (benchmarks only).
     pub profile: Option<Vec<(u64, u64)>>,
+    /// This chunk's structure terrain adaptation.
+    pub beard: Beard,
 }
 
 /// Java's `Math.round(float)`.
@@ -642,13 +713,17 @@ enum SplineInput {
 
 impl<'g> Context<'g> {
     pub fn new(graph: &'g Graph) -> Context<'g> {
-        Context { graph, cells: vec![CacheCell::default(); graph.cache_count], pool: Vec::new(), profile: None }
+        let pool = POOL.with(|p| std::mem::take(&mut *p.borrow_mut()));
+        Context { graph, cells: vec![CacheCell::default(); graph.cache_count], pool, profile: None, beard: Beard::default() }
     }
 
+    /// A scratch buffer of `len` values. Like vanilla's pooled buffers its contents are
+    /// stale; every sampler writes its whole output.
     fn acquire(&mut self, len: usize) -> Vec<f32> {
         let mut buffer = self.pool.pop().unwrap_or_default();
-        buffer.clear();
-        buffer.resize(len, 0.0);
+        if buffer.len() != len {
+            buffer.resize(len, 0.0);
+        }
         buffer
     }
 
@@ -1109,12 +1184,42 @@ impl<'g> Context<'g> {
                     self.release(ib);
                 }
             }
+            Node::Beardifier => {
+                out.fill(0.0);
+                if let Some((min, max)) = self.beard.affected {
+                    let intersects = max[0] >= vol.min_x
+                        && min[0] <= vol.max_block_x()
+                        && max[2] >= vol.min_z
+                        && min[2] <= vol.max_block_z()
+                        && max[1] >= vol.min_y
+                        && min[1] <= vol.max_block_y();
+                    if intersects {
+                        let lo_x = 0.max(min[0] - vol.min_x).div_euclid(vol.step_x);
+                        let lo_y = 0.max(min[1] - vol.min_y).div_euclid(vol.step_y);
+                        let lo_z = 0.max(min[2] - vol.min_z).div_euclid(vol.step_z);
+                        let hi_x = (vol.size_x - 1).min((max[0] - vol.min_x).div_euclid(vol.step_x));
+                        let hi_y = (vol.size_y - 1).min((max[1] - vol.min_y).div_euclid(vol.step_y));
+                        let hi_z = (vol.size_z - 1).min((max[2] - vol.min_z).div_euclid(vol.step_z));
+                        for z in lo_z..=hi_z {
+                            let bz = vol.block_z(z);
+                            for x in lo_x..=hi_x {
+                                let bx = vol.block_x(x);
+                                for y in lo_y..=hi_y {
+                                    out[vol.index_unchecked(x, y, z)] = beard_value(&self.beard, &g.beard_kernel, bx, vol.block_y(y), bz);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
             Node::Cache { id, input } => {
                 let id = *id;
                 if self.cells[id].volume.as_ref() != Some(vol) {
-                    let mut buffer = std::mem::take(&mut self.cells[id].buffer);
-                    buffer.clear();
-                    buffer.resize(vol.size(), 0.0);
+                    let old = std::mem::take(&mut self.cells[id].buffer);
+                    if old.capacity() > 0 {
+                        self.release(old);
+                    }
+                    let mut buffer = self.acquire(vol.size());
                     self.cells[id].volume = Some(*vol);
                     self.sample_volume(*input, &mut buffer, vol);
                     self.cells[id].buffer = buffer;
@@ -1307,6 +1412,14 @@ impl<'g> Context<'g> {
             Node::SliceY(input, sy) => self.sample_value(*input, x, *sy, z),
             Node::SliceZ(input, sz) => self.sample_value(*input, x, y, *sz),
             Node::SliceXz(input, sx, sz) => self.sample_value(*input, *sx, y, *sz),
+            Node::Beardifier => match self.beard.affected {
+                Some((min, max))
+                    if x >= min[0] && x <= max[0] && z >= min[2] && z <= max[2] && y >= min[1] && y <= max[1] =>
+                {
+                    beard_value(&self.beard, &g.beard_kernel, x, y, z)
+                }
+                _ => 0.0,
+            },
             Node::Cache { id, input } => {
                 let id = *id;
                 let key = pack_block_pos(x, y, z);
@@ -1462,6 +1575,70 @@ impl<'g> Context<'g> {
         }
         self.release(cb);
     }
+}
+
+/// `Mth.fastInvSqrt`
+fn fast_inv_sqrt(mut x: f64) -> f64 {
+    let half = 0.5 * x;
+    let i = 6910469410427058090i64.wrapping_sub(x.to_bits() as i64 >> 1);
+    x = f64::from_bits(i as u64);
+    x * (1.5 - half * x * x)
+}
+
+fn bury_contribution(dx: f32, dy: f32, dz: f32) -> f32 {
+    let distance_sq = dx * dx + dy * dy + dz * dz;
+    if distance_sq >= 36.0 {
+        0.0
+    } else {
+        1.0 - (distance_sq as f64).sqrt() as f32 / 6.0
+    }
+}
+
+fn beard_contribution(kernel: &[f32], dx: i32, dy: i32, dz: i32, y_to_ground: i32) -> f32 {
+    let (xi, yi, zi) = (dx + 12, dy + 12, dz + 12);
+    let in_range = |v: i32| (0..24).contains(&v);
+    if in_range(xi) && in_range(yi) && in_range(zi) {
+        let dy_offset = y_to_ground as f32 + 0.5;
+        let (fx, fz) = (dx as f32, dz as f32);
+        let distance_sqr = fx * fx + dy_offset * dy_offset + fz * fz;
+        let value = -dy_offset * fast_inv_sqrt((distance_sqr / 2.0) as f64) as f32 / 2.0;
+        value * kernel[(zi * 24 * 24 + xi * 24 + yi) as usize]
+    } else {
+        0.0
+    }
+}
+
+/// `Beardifier.sampleValueUnchecked`
+fn beard_value(beard: &Beard, kernel: &[f32], x: i32, y: i32, z: i32) -> f32 {
+    let mut value = 0.0f32;
+    for rigid in &beard.pieces {
+        let (min, max) = (rigid.min, rigid.max);
+        let dx = 0.max((min[0] - x).max(x - max[0]));
+        let dz = 0.max((min[2] - z).max(z - max[2]));
+        let ground_y = min[1] + rigid.ground_level_delta;
+        let dy_to_ground = y - ground_y;
+        let dy = match rigid.adjustment {
+            TerrainAdjustment::None => 0,
+            TerrainAdjustment::Bury | TerrainAdjustment::BeardThin => dy_to_ground,
+            TerrainAdjustment::BeardBox => 0.max((ground_y - y).max(y - max[1])),
+            TerrainAdjustment::Encapsulate => 0.max((min[1] - y).max(y - max[1])),
+        };
+        value += match rigid.adjustment {
+            TerrainAdjustment::None => 0.0,
+            TerrainAdjustment::Bury => bury_contribution(dx as f32, dy as f32 / 2.0, dz as f32),
+            TerrainAdjustment::BeardThin | TerrainAdjustment::BeardBox => {
+                beard_contribution(kernel, dx, dy, dz, dy_to_ground) * 0.8
+            }
+            TerrainAdjustment::Encapsulate => {
+                bury_contribution(dx as f32 / 2.0, dy as f32 / 2.0, dz as f32 / 2.0) * 0.8
+            }
+        };
+    }
+    for j in &beard.junctions {
+        let (dx, dy, dz) = (x - j[0], y - j[1], z - j[2]);
+        value += beard_contribution(kernel, dx, dy, dz, dy) * 0.4;
+    }
+    value
 }
 
 fn select_index(thresholds: &[f32], sampler_count: usize, input: f32) -> usize {
