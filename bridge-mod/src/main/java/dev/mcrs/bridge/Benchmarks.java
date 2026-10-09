@@ -117,7 +117,16 @@ public final class Benchmarks {
 												.then(Commands.argument("seconds", IntegerArgumentType.integer(5, 600))
 														.executes(c -> entities(c.getSource(), IdentifierArgument.getId(c, "type").toString(),
 																IntegerArgumentType.getInteger(c, "count"),
-																IntegerArgumentType.getInteger(c, "seconds")))))))));
+																IntegerArgumentType.getInteger(c, "seconds"))))))))
+				.then(Commands.literal("harness")
+						.then(Commands.argument("scenario", com.mojang.brigadier.arguments.StringArgumentType.word())
+								.then(Commands.argument("size", IntegerArgumentType.integer(1, 5000))
+										.then(Commands.argument("ticks", IntegerArgumentType.integer(1, 100000))
+												.then(Commands.argument("hash", com.mojang.brigadier.arguments.BoolArgumentType.bool())
+														.executes(c -> TickHarness.start(c.getSource(),
+																com.mojang.brigadier.arguments.StringArgumentType.getString(c, "scenario"),
+																IntegerArgumentType.getInteger(c, "size"), IntegerArgumentType.getInteger(c, "ticks"),
+																com.mojang.brigadier.arguments.BoolArgumentType.getBool(c, "hash")))))))));
 	}
 
 	private static ChunkPos freshArea() {
@@ -128,7 +137,8 @@ public final class Benchmarks {
 
 	/** While true, the server must keep ticking even with no players online. */
 	public static boolean isRunning() {
-		return running;
+		// Harness test servers keep ticking without players too.
+		return running || TickHarness.DETERMINISTIC;
 	}
 
 	private static boolean begin(CommandSourceStack source) {
@@ -260,6 +270,7 @@ public final class Benchmarks {
 
 	/** Called by {@link dev.mcrs.bridge.mixin.MinecraftServerMixin} after every tick. */
 	public static void onTick(long nanos) {
+		TickHarness.onTick(nanos);
 		EntityBench bench = entityBench;
 		if (bench != null && bench.record(nanos)) {
 			entityBench = null;
