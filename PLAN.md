@@ -360,6 +360,22 @@ What got it there:
   aquifer state) on 4,050+ chunks. On their own they're about as fast as Java's JIT;
   the gain comes from skipping Java's per-block `setBlockState` path and exact shortcuts.
 
+**Where the time goes now** (JFR with `-XX:+DebugNonSafepoints`, warm area, CPU 90–98% busy, so
+throughput is CPU-bound): features ~35% (ores ~8%: ~270 placements and ~100 veins per chunk, mostly
+per-block section access), Rust fill + surface ~20%, light ~15% (serial: 77% busy at 320 chunks/s,
+which caps generation near ~410 chunks/s), biomes ~9%, carvers ~8%.
+
+Back to back after bulk-copying Rust results and reading neighbor biomes directly (`e19c018`):
+vanilla 97.3 / 120.3 / 138.8 / 163.5, mcrs 150.6 / 227.0 / 248.2 / 322.1 chunks/s (2.0×).
+
+Tried, exact, but no measurable gain (run-to-run noise is ±5%), so not kept:
+- Ore vein cell walk without per-cell divisions (verified identical on 3M veins): 0.41 → 0.28 ms/chunk.
+- Biome `Climate.RTree` search on flat arrays (verified identical on 10M searches).
+- G1 / Parallel GC instead of ZGC; `target-cpu=x86-64-v3` for the Rust fill.
+
+Remaining levers are large ports, each worth ~5–15%: light engine (also lifts the serial cap),
+carvers into the Rust fill (they already have the aquifer and surface rules there), biomes, features.
+
 ## 11. Next Steps
 
 1. Density function framework (`densityfunction/*`, ~4300 lines): parse the vanilla datapack's
