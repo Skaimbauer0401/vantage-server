@@ -28,8 +28,61 @@ public final class Oracle {
 	public static void main(String[] args) throws IOException {
 		Path dir = Path.of(args[0]);
 		Files.createDirectories(dir);
+		net.minecraft.SharedConstants.tryDetectVersion();
+		net.minecraft.server.Bootstrap.bootStrap();
 		suite(dir, "random", Oracle::random);
 		suite(dir, "math", Oracle::math);
+		suite(dir, "noise", Oracle::noise);
+	}
+
+	/** Same formula in the Rust test; some points lie beyond the noise wrap range. */
+	static double[] point(int i) {
+		double x = (i * 7919 % 2003 - 1001) * 0.37 + i * 0.0013;
+		double y = (i * 104729 % 389 - 64) * 0.91;
+		double z = (i * 7907 % 1999 - 999) * 0.53 - i * 0.0007;
+		if (i % 10 == 0) {
+			x *= 99991.0;
+			z *= 49999.0;
+		}
+		return new double[] {x, y, z};
+	}
+
+	static final int POINTS = 200;
+	static final net.minecraft.world.level.levelgen.densityfunction.DensityVolume VOLUME =
+			new net.minecraft.world.level.levelgen.densityfunction.DensityVolume(4, 6, 3, -17, -64, 33, 2, 8, 4);
+
+	void sampleNoise(String p, net.minecraft.world.level.levelgen.synth.Noise noise) {
+		for (int i = 0; i < POINTS; i++) {
+			double[] q = point(i);
+			f(p + ".get3[" + i + "]", noise.get(q[0], q[1], q[2]));
+			f(p + ".get2[" + i + "]", noise.get(q[0], q[2]));
+		}
+		var buffer = net.minecraft.world.level.levelgen.densityfunction.DensityBuffer.createUnpooled(VOLUME.size());
+		noise.addToVolume(buffer, VOLUME, 0.03, 0.07, 0.75F);
+		noise.addToVolume(buffer, VOLUME, 1.7, 0.4, -1.25F);
+		for (int i = 0; i < VOLUME.size(); i++) {
+			f(p + ".volume[" + i + "]", buffer.get(i));
+		}
+	}
+
+	static void noise(Oracle o) {
+		for (long seed : new long[] {0L, 42L, -123456789L}) {
+			String s = "[" + seed + "]";
+			o.sampleNoise("perlin" + s, new net.minecraft.world.level.levelgen.synth.PerlinNoise(new XoroshiroRandomSource(seed)));
+			o.sampleNoise("perlinLegacy" + s, new net.minecraft.world.level.levelgen.synth.PerlinNoise(new LegacyRandomSource(seed)));
+			o.sampleNoise("smeared" + s, new net.minecraft.world.level.levelgen.synth.SmearedPerlinNoise(new XoroshiroRandomSource(seed), 4.2));
+			o.sampleNoise("simplex" + s, new net.minecraft.world.level.levelgen.synth.SimplexNoise(new XoroshiroRandomSource(seed)));
+			var normal = net.minecraft.world.level.levelgen.synth.NormalNoise.builder().setBaseOctave(-7).setOctaveCount(3).build();
+			o.sampleNoise("normal" + s, normal.create(new XoroshiroRandomSource(seed)));
+			o.sampleNoise("normalLegacyRandom" + s, normal.create(new LegacyRandomSource(seed)));
+			var parity = net.minecraft.world.level.levelgen.synth.NormalNoise.createParity(-9, 1.0, 0.0, 3.0, 1.5);
+			o.sampleNoise("parity" + s, parity.create(new XoroshiroRandomSource(seed)));
+			var legacy = net.minecraft.world.level.levelgen.synth.NormalNoise.builder()
+					.setBaseOctave(-4).setOctaveCount(4).setLegacyNormalization().setAmplitudeModifier(1, 0.5).build();
+			o.sampleNoise("legacyNorm" + s, legacy.create(new XoroshiroRandomSource(seed)));
+			o.sampleNoise("fbm" + s, net.minecraft.world.level.levelgen.synth.BlendedNoise.createFbm(
+					new XoroshiroRandomSource(seed), -15, 684.412 * 0.125 * 8.0, 0.99998474F));
+		}
 	}
 
 	/**

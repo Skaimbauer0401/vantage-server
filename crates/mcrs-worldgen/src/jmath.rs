@@ -12,7 +12,11 @@
 //! Permission to use, copy, modify, and distribute this software is freely
 //! granted, provided that this notice is preserved.
 
-#![allow(clippy::excessive_precision, clippy::many_single_char_names, clippy::too_many_lines)]
+// fdlibm idioms: `x - x` and `(x - x) / (x - x)` produce NaN on purpose, and the
+// constants must keep exactly these digits.
+#![allow(clippy::excessive_precision, clippy::approx_constant, clippy::eq_op, clippy::many_single_char_names)]
+// Kept structurally identical to the C original so it can be checked line by line.
+#![allow(clippy::needless_late_init, clippy::if_same_then_else, clippy::explicit_counter_loop, clippy::needless_range_loop)]
 
 #[inline]
 fn hi(x: f64) -> i32 {

@@ -4,4 +4,5 @@
 //! classes and writes reference values that the tests in `tests/` compare against.
 
 pub mod jmath;
+pub mod noise;
 pub mod random;

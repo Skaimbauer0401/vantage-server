@@ -366,3 +366,65 @@ pub fn get_seed(x: i32, y: i32, z: i32) -> i64 {
 pub fn java_string_hash(s: &str) -> i32 {
     s.encode_utf16().fold(0i32, |h, c| h.wrapping_mul(31).wrapping_add(c as i32))
 }
+
+/// `PositionalRandomFactory` (vanilla names: `fromHashOf`, `fromSeed`).
+#[allow(clippy::wrong_self_convention)]
+pub trait PositionalRandomFactory {
+    type Random: RandomSource;
+    fn at(&self, x: i32, y: i32, z: i32) -> Self::Random;
+    fn from_hash_of(&self, name: &str) -> Self::Random;
+    fn from_seed(&self, seed: i64) -> Self::Random;
+}
+
+/// Random sources that can fork (`fork`, `forkPositional`).
+pub trait ForkingRandom: RandomSource + Sized {
+    type Positional: PositionalRandomFactory;
+    fn fork_random(&mut self) -> Self;
+    fn fork_positional_factory(&mut self) -> Self::Positional;
+}
+
+impl PositionalRandomFactory for LegacyPositionalFactory {
+    type Random = LegacyRandom;
+    fn at(&self, x: i32, y: i32, z: i32) -> LegacyRandom {
+        LegacyPositionalFactory::at(self, x, y, z)
+    }
+    fn from_hash_of(&self, name: &str) -> LegacyRandom {
+        LegacyPositionalFactory::from_hash_of(self, name)
+    }
+    fn from_seed(&self, seed: i64) -> LegacyRandom {
+        LegacyPositionalFactory::from_seed(self, seed)
+    }
+}
+
+impl PositionalRandomFactory for XoroshiroPositionalFactory {
+    type Random = XoroshiroRandom;
+    fn at(&self, x: i32, y: i32, z: i32) -> XoroshiroRandom {
+        XoroshiroPositionalFactory::at(self, x, y, z)
+    }
+    fn from_hash_of(&self, name: &str) -> XoroshiroRandom {
+        XoroshiroPositionalFactory::from_hash_of(self, name)
+    }
+    fn from_seed(&self, seed: i64) -> XoroshiroRandom {
+        XoroshiroPositionalFactory::from_seed(self, seed)
+    }
+}
+
+impl ForkingRandom for LegacyRandom {
+    type Positional = LegacyPositionalFactory;
+    fn fork_random(&mut self) -> LegacyRandom {
+        self.fork()
+    }
+    fn fork_positional_factory(&mut self) -> LegacyPositionalFactory {
+        self.fork_positional()
+    }
+}
+
+impl ForkingRandom for XoroshiroRandom {
+    type Positional = XoroshiroPositionalFactory;
+    fn fork_random(&mut self) -> XoroshiroRandom {
+        self.fork()
+    }
+    fn fork_positional_factory(&mut self) -> XoroshiroPositionalFactory {
+        self.fork_positional()
+    }
+}

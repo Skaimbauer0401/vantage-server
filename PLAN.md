@@ -315,11 +315,35 @@ included). Anything Rust can't resolve exactly goes to vanilla unchanged.
 Note: 26.x palettes store default states as bare names and others as `{id, properties}` (not the old
 `{Name, Properties}`), and NBT lists can be heterogeneous (strings wrapped as `{"": ...}`).
 
+**Phase 2b: block counts (done).** Rust also computes `LevelChunkSection` block counts while it has
+the palette; Java skips the 4096-block scan. Verified on 137k sections. Warm A/B (JIT warmed up
+by a first load): vanilla ~1630 chunks/s, mcrs ~2340 chunks/s (1.44×). The remaining loading cost
+is mostly main-thread work (`SerializableChunkData.read`) that vanilla deliberately keeps there.
+Loading is no longer the player-facing bottleneck (~2300 chunks/s vs ~95 chunks/s generation).
+
+**Phase 3: worldgen port (in progress)** in `crates/mcrs-worldgen`, checked against vanilla by
+`tools/oracle` (runs vanilla's own classes and writes reference values):
+
+| Module | Oracle check |
+|---|---|
+| Random sources, seeding, `Mth.getSeed` | 538 values identical |
+| fdlibm `log/exp/pow/sin/cos` (`jmath`) | 1,200,204 values identical |
+| Perlin, smeared Perlin, simplex, `NoiseStack`, `NormalNoise`, blended fbm | 12,744 values identical |
+
+Decision: HotSpot's `Math.log/exp/pow/sin/cos` intrinsics differ from fdlibm in 2-10% of inputs and
+between x86 and ARM, so vanilla itself is not deterministic across platforms. mcrs starts the JVM
+with `-XX:-UseLibmIntrinsic` (config `deterministic_math`), which makes `Math` equal `StrictMath`
+(0 differences in 2M inputs) and lets the Rust port match bit for bit.
+
+26.x specifics: density functions compute in `float`; `PerlinNoise.get` and `addToVolume` sum dot
+products in different orders (both ported as written); `NormalNoise` uses `DoubleStream.sum`
+(Kahan summation).
+
 ## 11. Next Steps
 
-1. Profile loading again with the Rust path on, to find the next bottleneck (likely the main-thread
-   `SerializableChunkData.read`, Java NBT parsing of the remaining tag, and lighting).
-2. Mixin conflict check: disable the fast path when another mod targets `IOWorker.loadAsync`,
-   `SerializableChunkData.parse` or its section lambdas.
-3. Same treatment for entity chunks (`entities/` region files) and POI.
-4. Worldgen parity tool: dump vanilla chunks for a seed, ready for comparison.
+1. Density function framework (`densityfunction/*`, ~4300 lines): parse the vanilla datapack's
+   `worldgen/density_function` and `noise_settings` JSON, compile to samplers, oracle-test every type.
+2. `NoiseChunk` / `NoiseBasedChunkGenerator.doFill` with aquifers and ore veins → first Rust-filled
+   terrain, compared block by block against vanilla chunks.
+3. Surface (`MaterialSystem`), then hook into the chunk pipeline behind a verify mode.
+4. Mixin conflict check: disable fast paths when another mod targets the same vanilla code.
