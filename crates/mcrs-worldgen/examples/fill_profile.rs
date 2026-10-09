@@ -3,7 +3,10 @@
 //! resolved (including inlined frames) at the end. Needs line tables in the release build:
 //!
 //!     CARGO_PROFILE_RELEASE_DEBUG=line-tables-only cargo run --release -p mcrs-worldgen \
-//!         --example fill_profile -- run/mcrs-worldgen-0.json [seconds]
+//!         --example fill_profile -- run/mcrs-worldgen-0.json [seconds] [fills.bin]
+//!
+//! With `fills.bin` (recorded by the server with `MCRS_DUMP_FILLS=fills.bin`) it replays
+//! real fill requests, biomes included; otherwise it uses a synthetic biome layout.
 
 #[cfg(not(windows))]
 fn main() {
@@ -27,6 +30,22 @@ fn main() {
     let mut args = std::env::args().skip(1);
     let path = args.next().expect("usage: fill_profile <export.json> [seconds]");
     let seconds: f64 = args.next().map_or(10.0, |s| s.parse().unwrap());
+    let recorded: Vec<(i32, i32, i32, i32, Vec<i32>)> = match args.next() {
+        Some(file) => {
+            let bytes = std::fs::read(file).unwrap();
+            let ints: Vec<i32> = bytes.chunks_exact(4).map(|c| i32::from_le_bytes(c.try_into().unwrap())).collect();
+            let mut out = Vec::new();
+            let mut i = 0;
+            while i + 5 <= ints.len() {
+                let len = ints[i + 4] as usize;
+                out.push((ints[i], ints[i + 1], ints[i + 2], ints[i + 3], ints[i + 5..i + 5 + len].to_vec()));
+                i += 5 + len;
+            }
+            println!("replaying {} recorded fills", out.len());
+            out
+        }
+        None => Vec::new(),
+    };
     let json: serde_json::Value = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
     let generator = Generator::from_json(&json).unwrap();
     let (min_y, height) = (-64, 384);
@@ -72,6 +91,28 @@ fn main() {
     let start = Instant::now();
     let mut chunks = 0u64;
     'outer: loop {
+        for (cx, cz, fill_min_y, fill_height, p) in &recorded {
+            let biomes = BiomeArea { chunk_x: *cx, chunk_z: *cz, min_quart_y: p[10], quart_height: p[11], ids: p[12..].iter().map(|v| *v as u32).collect() };
+            let input = SurfaceInput {
+                biomes: &biomes,
+                gen: GenContext { min_gen_y: p[5], gen_depth: p[6], sea_level: p[7] },
+                gen_min_y: p[3],
+                gen_max_y: p[4],
+                default_block: p[8] as u32,
+                plain_air: p[9] as u32,
+                sea_level: p[7],
+                noise_volume: DensityVolume::new([16, *fill_height, 16], [cx << 4, *fill_min_y, cz << 4], [1, 1, 1]),
+            };
+            let params = FillParams { chunk_min_y: p[0], chunk_height: p[1], surface: (p[2] == 1).then_some(input) };
+            std::hint::black_box(generator.fill(*cx, *cz, *fill_min_y, *fill_height, Default::default(), &params));
+            chunks += 1;
+            if start.elapsed().as_secs_f64() > seconds {
+                break 'outer;
+            }
+        }
+        if !recorded.is_empty() {
+            continue;
+        }
         for x in 0..10 {
             for z in 0..10 {
                 let (cx, cz) = (x * 7 - 300, z * 5 + 200);

@@ -131,6 +131,9 @@ pub extern "C" fn wg_fill(
             sea_level: p[7],
             noise_volume: DensityVolume::new([16, height, 16], [chunk_x << 4, min_y, chunk_z << 4], [1, 1, 1]),
         });
+        if handle == 1 && beard.affected.is_none() {
+            dump_fill(chunk_x, chunk_z, min_y, height, p);
+        }
         let fill_params = FillParams { chunk_min_y: p[0], chunk_height: p[1], surface };
         let start = Instant::now();
         let filled = generator.fill(chunk_x, chunk_z, min_y, height, beard, &fill_params);
@@ -298,4 +301,28 @@ pub fn report_stats() {
             ms(p[0]), ms(p[1]), ms(p[2]), ms(p[3]), ms(p[4])
         );
     }
+}
+
+/// `MCRS_DUMP_FILLS=<file>`: append the first 400 overworld fill requests without
+/// structures (chunk x, z, min y, height, params length, params; i32 little endian) for
+/// offline profiling with `examples/fill_profile.rs`.
+fn dump_fill(chunk_x: i32, chunk_z: i32, min_y: i32, height: i32, params: &[i32]) {
+    use std::io::Write;
+    use std::sync::{Mutex, OnceLock};
+    static DUMP: OnceLock<Option<Mutex<(std::fs::File, u32)>>> = OnceLock::new();
+    let dump = DUMP.get_or_init(|| {
+        let path = std::env::var_os("MCRS_DUMP_FILLS")?;
+        Some(Mutex::new((std::fs::File::create(path).ok()?, 0)))
+    });
+    let Some(dump) = dump else { return };
+    let mut guard = dump.lock().unwrap();
+    if guard.1 >= 400 {
+        return;
+    }
+    guard.1 += 1;
+    let mut bytes = Vec::with_capacity((5 + params.len()) * 4);
+    for v in [chunk_x, chunk_z, min_y, height, params.len() as i32].iter().chain(params) {
+        bytes.extend_from_slice(&v.to_le_bytes());
+    }
+    let _ = guard.0.write_all(&bytes);
 }
