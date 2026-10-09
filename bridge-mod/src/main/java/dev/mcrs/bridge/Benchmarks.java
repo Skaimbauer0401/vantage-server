@@ -37,6 +37,60 @@ public final class Benchmarks {
 	public static final java.util.concurrent.atomic.AtomicLong LIGHT_NANOS = new java.util.concurrent.atomic.AtomicLong();
 
 	private static boolean running;
+
+	/** Samples the worker pool every 2 ms while a chunk benchmark runs. */
+	private static final class PoolSampler extends Thread {
+		volatile boolean stop;
+		long samples;
+		long running;
+		long active;
+		long queued;
+		long idleWithoutWork;
+
+		PoolSampler() {
+			super("mcrs-pool-sampler");
+			setDaemon(true);
+		}
+
+		@Override
+		public void run() {
+			java.util.concurrent.ForkJoinPool pool = null;
+			while (!stop) {
+				if (pool == null) {
+					for (Thread t : Thread.getAllStackTraces().keySet()) {
+						if (t instanceof java.util.concurrent.ForkJoinWorkerThread w && t.getName().startsWith("Worker-Main")) {
+							pool = w.getPool();
+							break;
+						}
+					}
+				}
+				if (pool != null) {
+					samples++;
+					int r = pool.getRunningThreadCount();
+					running += r;
+					active += pool.getActiveThreadCount();
+					long q = pool.getQueuedSubmissionCount() + pool.getQueuedTaskCount();
+					queued += q;
+					if (q == 0 && r < pool.getParallelism()) {
+						idleWithoutWork++;
+					}
+				}
+				try {
+					Thread.sleep(2);
+				} catch (InterruptedException e) {
+					return;
+				}
+			}
+		}
+
+		String summary() {
+			if (samples == 0) {
+				return "pool: no samples";
+			}
+			return String.format(Locale.ROOT, "workers running avg %.1f, active avg %.1f, queued tasks avg %.1f, no queued work %.0f%% of the time",
+					(double) running / samples, (double) active / samples, (double) queued / samples, 100.0 * idleWithoutWork / samples);
+		}
+	}
 	private static EntityBench entityBench;
 
 	private Benchmarks() {
@@ -105,6 +159,8 @@ public final class Benchmarks {
 
 		long start = System.nanoTime();
 		LIGHT_NANOS.set(0);
+		PoolSampler sampler = new PoolSampler();
+		sampler.start();
 		cache.addTicketAndLoadWithRadius(TicketType.FORCED, pos, radius).whenComplete((ignored, error) -> server.execute(() -> {
 			double seconds = (System.nanoTime() - start) / 1e9;
 			int loaded = 0;
@@ -123,6 +179,8 @@ public final class Benchmarks {
 			}
 			report(source, String.format(Locale.ROOT, "[bench] chunks: %d full chunks in %.2f s = %.1f chunks/s (center %d %d, %s)",
 					loaded, seconds, loaded / seconds, pos.x(), pos.z(), generate ? "generated" : "loaded"));
+			sampler.stop = true;
+			report(source, "[bench] " + sampler.summary());
 			report(source, String.format(Locale.ROOT, "[bench] light engine busy %.2f s of %.2f s (%.0f%%)",
 					LIGHT_NANOS.get() / 1e9, seconds, 100 * LIGHT_NANOS.get() / 1e9 / seconds));
 			report(source, String.format(Locale.ROOT, "[bench] terrain: %d filled by Rust, %d by vanilla%s",

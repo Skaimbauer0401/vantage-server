@@ -18,4 +18,8 @@ LOG="$DIR/bench-${2:-run}.log"
 ( sleep 20
   for c in "0 2000" "2000 0" "-2000 -2000" "3000 3000"; do echo "mcrs bench chunks 16 $c"; sleep 20; done
   echo stop; sleep 30 ) | MCRS_RUN_DIR="$DIR" MCRS_JVM_OPTIONS="$1" ./target/release/mcrs > "$LOG" 2>&1
-sed 's/\x1b\[[0-9;]*m//g' "$LOG" | grep -a "mcrs::java" | grep -aoE "[0-9]+ full chunks in [0-9.]+ s = [0-9.]+ chunks/s|terrain: .*|light engine busy.*"
+# Keep the world for comparisons (crates/mcrs-chunk/examples/compare_worlds.rs).
+mkdir -p target/bench-worlds
+rm -rf "target/bench-worlds/${2:-run}"
+cp -r "$DIR/world" "target/bench-worlds/${2:-run}"
+sed 's/\x1b\[[0-9;]*m//g' "$LOG" | grep -a "mcrs::java" | grep -aoE "[0-9]+ full chunks in [0-9.]+ s = [0-9.]+ chunks/s|terrain: .*|light engine busy.*|workers running.*"
