@@ -187,6 +187,10 @@ public final class Benchmarks {
 					TerrainFill.FILLED.getAndSet(0), TerrainFill.SKIPPED.getAndSet(0),
 					TerrainFill.VERIFY ? String.format(Locale.ROOT, ", verify: %d compared, %d differ",
 							TerrainFill.VERIFIED.get(), TerrainFill.MISMATCHED.get()) : ""));
+			if (FastLight.VERIFY) {
+				report(source, String.format(Locale.ROOT, "[bench] fast light verify: %d lookups compared, %d differ",
+						FastLight.CHECKED.get(), FastLight.MISMATCHED.get()));
+			}
 			if (ChunkIo.VERIFY) {
 				report(source, String.format(Locale.ROOT, "[bench] chunk io verify: %d containers compared, %d mismatches",
 						ChunkIo.VERIFIED.get(), ChunkIo.MISMATCHES.get()));
