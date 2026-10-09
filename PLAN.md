@@ -388,6 +388,21 @@ row above), so the plan is the same algorithm with flat caches, not an idealized
 2. Verify with a shadow vanilla `LevelLightEngine` fed the same calls; compare data layers after every
    `runLightUpdates`.
 
+**Update (stage timers, Rust profiler).** The benchmark now reports wall time per generation stage
+(with `-Dmax.bg.threads=6` it equals CPU time) and the Rust fill phases. Earlier JFR-based shares were
+misleading: JFR can't attribute native Rust time and its stack walks stop at hidden lambda frames. Real
+split (warm area, ms per full chunk): Rust terrain fill ~12 (density ~3, blocks + aquifer ~2.2,
+surface rules ~4.3), features ~3.9 (ores ~2), biomes ~1, carvers ~0.9, rest < 0.5 each. Light is ~1
+ms/chunk on its own thread (cap ~900 chunks/s), not a limit.
+
+`examples/fill_profile.rs` samples the fill in-process (no admin rights) and can replay real requests
+recorded with `MCRS_DUMP_FILLS`. Done since: Perlin volume sampling hoisted + vectorized (density 2.8
+-> 1.7 ms offline), biome conditions decided from the 8 zoom candidates, unary ops vectorized, light
+increase propagation and sky source fill with cached lookups. All verified exact.
+
+Back to back now: vanilla 92.1 / 119.2 / 139.0 / 163.5, mcrs 158.4 / 233.8 / 264.4 / 354.7 chunks/s
+(2.2x in the warm area).
+
 ## 11. Next Steps
 
 1. Density function framework (`densityfunction/*`, ~4300 lines): parse the vanilla datapack's
