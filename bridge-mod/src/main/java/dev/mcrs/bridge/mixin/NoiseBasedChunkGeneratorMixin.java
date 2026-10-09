@@ -44,7 +44,10 @@ public abstract class NoiseBasedChunkGeneratorMixin {
 
 	@Inject(method = "doFill", at = @At("HEAD"), cancellable = true)
 	private void mcrs$doFill(NoiseChunk noiseChunk, ChunkAccess chunk, CallbackInfo ci) {
-		if (!TerrainFill.VERIFY && TerrainFill.tryFill(noiseChunk, chunk, settings.value(), (ChunkGenerator) (Object) this)) {
+		dev.mcrs.bridge.StageTimes.begin(dev.mcrs.bridge.StageTimes.FILL);
+		boolean filled = !TerrainFill.VERIFY && TerrainFill.tryFill(noiseChunk, chunk, settings.value(), (ChunkGenerator) (Object) this);
+		dev.mcrs.bridge.StageTimes.end(dev.mcrs.bridge.StageTimes.FILL);
+		if (filled) {
 			ci.cancel();
 		}
 	}

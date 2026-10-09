@@ -279,7 +279,112 @@ impl PerlinNoise {
 
     /// Shared body of the vectorized volume sampling; `fudge` maps
     /// (original y, relative y) to the relative y used for the y gradients.
+    ///
+    /// Same arithmetic per point as vanilla's loop (see `add_to_volume_reference`), but
+    /// everything that depends only on y is computed once for all columns, and each run of
+    /// points with the same `floor(y)` (fixed gradients) is a branch-free loop that the
+    /// compiler vectorizes. Float operations are neither fused nor reordered, so every
+    /// point is bit-identical.
     fn add_to_volume_impl(
+        &self,
+        buffer: &mut [f32],
+        volume: &DensityVolume,
+        xz_scale: f64,
+        y_scale: f64,
+        amplitude: f32,
+        fudge: Option<f64>,
+    ) {
+        let b = &self.base;
+        let ny = volume.size_y as usize;
+        Y_SCRATCH.with_borrow_mut(|scratch| {
+            let YScratch { ry, alpha, runs } = scratch;
+            ry.clear();
+            alpha.clear();
+            runs.clear();
+            let mut last_floor_y = i32::MIN;
+            for iy in 0..volume.size_y {
+                let original_y = volume.block_y(iy) as f64 * y_scale;
+                let y = wrap(original_y) + b.offset_y;
+                let floor_y = floor(y);
+                let relative_y = y - floor_y as f64;
+                alpha.push(smoothstep(relative_y as f32));
+                ry.push(match fudge {
+                    None => relative_y as f32,
+                    Some(scale) => (relative_y - compute_fudge_y(scale, original_y, relative_y)) as f32,
+                });
+                if floor_y != last_floor_y || runs.is_empty() {
+                    runs.push((iy as usize, floor_y));
+                    last_floor_y = floor_y;
+                }
+            }
+
+            let mut base_index = 0;
+            for iz in 0..volume.size_z {
+                let z = wrap(volume.block_z(iz) as f64 * xz_scale) + b.offset_z;
+                let floor_z = floor(z);
+                let rz = (z - floor_z as f64) as f32;
+                let alpha_z = smoothstep(rz);
+                for ix in 0..volume.size_x {
+                    let x = wrap(volume.block_x(ix) as f64 * xz_scale) + b.offset_x;
+                    let floor_x = floor(x);
+                    let rx = (x - floor_x as f64) as f32;
+                    let x0 = b.permute(floor_x);
+                    let x1 = b.permute(floor_x + 1);
+                    let alpha_x = smoothstep(rx);
+                    for (r, &(start, floor_y)) in runs.iter().enumerate() {
+                        let end = runs.get(r + 1).map_or(ny, |next| next.0);
+                        let xy00 = b.permute(x0 + floor_y);
+                        let xy01 = b.permute(x0 + floor_y + 1);
+                        let xy10 = b.permute(x1 + floor_y);
+                        let xy11 = b.permute(x1 + floor_y + 1);
+                        let g = b.permute_to_grad(xy00 + floor_z);
+                        let (d000xz, g000y) = (dot_xz(g, rx, rz), g[1] as f32);
+                        let g = b.permute_to_grad(xy10 + floor_z);
+                        let (d100xz, g100y) = (dot_xz(g, rx - 1.0, rz), g[1] as f32);
+                        let g = b.permute_to_grad(xy01 + floor_z);
+                        let (d010xz, g010y) = (dot_xz(g, rx, rz), g[1] as f32);
+                        let g = b.permute_to_grad(xy11 + floor_z);
+                        let (d110xz, g110y) = (dot_xz(g, rx - 1.0, rz), g[1] as f32);
+                        let g = b.permute_to_grad(xy00 + floor_z + 1);
+                        let (d001xz, g001y) = (dot_xz(g, rx, rz - 1.0), g[1] as f32);
+                        let g = b.permute_to_grad(xy10 + floor_z + 1);
+                        let (d101xz, g101y) = (dot_xz(g, rx - 1.0, rz - 1.0), g[1] as f32);
+                        let g = b.permute_to_grad(xy01 + floor_z + 1);
+                        let (d011xz, g011y) = (dot_xz(g, rx, rz - 1.0), g[1] as f32);
+                        let g = b.permute_to_grad(xy11 + floor_z + 1);
+                        let (d111xz, g111y) = (dot_xz(g, rx - 1.0, rz - 1.0), g[1] as f32);
+
+                        let out = &mut buffer[base_index + start..base_index + end];
+                        let ry = &ry[start..end];
+                        let alpha = &alpha[start..end];
+                        for k in 0..out.len() {
+                            let ry = ry[k];
+                            out[k] += amplitude
+                                * lerp3(
+                                    alpha_x,
+                                    alpha[k],
+                                    alpha_z,
+                                    d000xz + g000y * ry,
+                                    d100xz + g100y * ry,
+                                    d010xz + g010y * (ry - 1.0),
+                                    d110xz + g110y * (ry - 1.0),
+                                    d001xz + g001y * ry,
+                                    d101xz + g101y * ry,
+                                    d011xz + g011y * (ry - 1.0),
+                                    d111xz + g111y * (ry - 1.0),
+                                );
+                        }
+                    }
+                    base_index += ny;
+                }
+            }
+        });
+    }
+
+    /// Shared body of the vectorized volume sampling; `fudge` maps
+    /// (original y, relative y) to the relative y used for the y gradients.
+    #[doc(hidden)]
+    pub fn add_to_volume_reference(
         &self,
         buffer: &mut [f32],
         volume: &DensityVolume,
@@ -389,6 +494,19 @@ impl Noise for PerlinNoise {
     fn add_to_volume(&self, buffer: &mut [f32], volume: &DensityVolume, xz_scale: f64, y_scale: f64, amplitude: f32) {
         self.add_to_volume_impl(buffer, volume, xz_scale, y_scale, amplitude, None);
     }
+}
+
+/// Per-y values of one volume sampling, reused between calls on a thread.
+#[derive(Default)]
+struct YScratch {
+    ry: Vec<f32>,
+    alpha: Vec<f32>,
+    /// (first y index, floor(y)) of each run of equal floor(y).
+    runs: Vec<(usize, i32)>,
+}
+
+thread_local! {
+    static Y_SCRATCH: std::cell::RefCell<YScratch> = std::cell::RefCell::new(YScratch::default());
 }
 
 /// `1.0E-7F` widened to double.

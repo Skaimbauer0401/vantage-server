@@ -89,6 +89,18 @@ fn main() {
     let profile = profile.unwrap();
     let mut order: Vec<usize> = (0..profile.len()).collect();
     order.sort_by_key(|&i| std::cmp::Reverse(profile[i].0));
+    // Leaf-like node kinds (they sample noise directly): their inclusive time is their own.
+    let mut kinds: std::collections::BTreeMap<String, (f64, u64)> = Default::default();
+    for (i, node) in generator.graph.nodes.iter().enumerate() {
+        let name = format!("{:?}", node);
+        let kind: String = name.chars().take_while(|c| c.is_alphanumeric()).collect();
+        if kind.contains("Noise") || kind == "Beardifier" || kind == "YClampedGradient" || kind == "EndIslands" || kind == "WeirdScaledSampler" {
+            let e = kinds.entry(kind).or_default();
+            e.0 += profile[i].0 as f64 / 1e6;
+            e.1 += profile[i].1;
+        }
+    }
+    println!("leaf node kinds (10 chunks): {kinds:?}");
     println!("top nodes by inclusive time (10 chunks):");
     for &i in order.iter().take(25) {
         let node = format!("{:?}", generator.graph.nodes[i]);

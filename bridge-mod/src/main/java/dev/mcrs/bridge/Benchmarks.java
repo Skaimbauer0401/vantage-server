@@ -189,6 +189,7 @@ public final class Benchmarks {
 					TerrainFill.FILLED.getAndSet(0), TerrainFill.SKIPPED.getAndSet(0),
 					TerrainFill.VERIFY ? String.format(Locale.ROOT, ", verify: %d compared, %d differ",
 							TerrainFill.VERIFIED.get(), TerrainFill.MISMATCHED.get()) : ""));
+			report(source, "[bench] " + StageTimes.summary(loaded));
 			if (FastLight.VERIFY) {
 				report(source, String.format(Locale.ROOT, "[bench] fast light verify: %d checks %s, %d differ",
 						FastLight.CHECKED.get(), FastLight.BY_KIND, FastLight.MISMATCHED.get()));

@@ -654,7 +654,19 @@ pub struct FillParams<'a> {
 impl Generator {
     /// `doFill` (and, with `params.surface`, `buildSurface`) for one chunk; the noise
     /// volume is `[min_y, min_y + height)`.
+    /// Nanoseconds per fill phase: aquifer setup, final density volume, blocks + aquifer,
+    /// surface, output packing. Summed over threads; read and reset with `take_phase_nanos`.
+    pub fn take_phase_nanos() -> [u64; 5] {
+        std::array::from_fn(|i| PHASE_NANOS[i].swap(0, std::sync::atomic::Ordering::Relaxed))
+    }
+
     pub fn fill(&self, chunk_x: i32, chunk_z: i32, min_y: i32, height: i32, beard: Beard, params: &FillParams) -> FillOut {
+        let mut phase = std::time::Instant::now();
+        let mut lap = |i: usize| {
+            let now = std::time::Instant::now();
+            PHASE_NANOS[i].fetch_add((now - phase).as_nanos() as u64, std::sync::atomic::Ordering::Relaxed);
+            phase = now;
+        };
         let volume = DensityVolume::new([16, height, 16], [chunk_x << 4, min_y, chunk_z << 4], [1, 1, 1]);
         let mut ctx = Context::new(&self.graph);
         ctx.beard = beard;
@@ -663,7 +675,9 @@ impl Generator {
             (Some(nodes), Some(random)) => Some(Aquifer::new(self, nodes, random, &mut ctx, &volume)),
             _ => None,
         };
+        lap(0);
         let density = ctx.sample_volume_new(self.final_density, &volume);
+        lap(1);
         let flags = &self.state_flags;
         let mut chunk = ChunkBlocks::new(params.chunk_min_y, params.chunk_height, self.air);
 
@@ -702,6 +716,7 @@ impl Generator {
             }
         }
         crate::density::recycle([density]);
+        lap(2);
 
         let surface_done = match (&self.surface, &params.surface) {
             (Some(surface), Some(input)) => {
@@ -711,6 +726,7 @@ impl Generator {
             }
             _ => false,
         };
+        lap(3);
 
         let mut out = FillOut {
             sections: chunk.sections.iter().map(|s| s.as_ref().map_or_else(SectionOut::default, |s| self.pack_section(s))).collect(),
@@ -735,6 +751,7 @@ impl Generator {
                 }
             }
         }
+        lap(4);
         out
     }
 
@@ -826,3 +843,5 @@ impl Generator {
         SectionOut { palette: palette.clone(), data, counts }
     }
 }
+
+static PHASE_NANOS: [std::sync::atomic::AtomicU64; 5] = [const { std::sync::atomic::AtomicU64::new(0) }; 5];

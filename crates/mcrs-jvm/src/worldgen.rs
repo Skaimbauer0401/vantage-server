@@ -290,5 +290,12 @@ pub fn report_stats() {
             "filled {chunks} chunks in Rust ({structures} with structure terrain adaptation), {:.2} ms each (per thread)",
             nanos as f64 / chunks as f64 / 1e6
         );
+        let p = mcrs_worldgen::fill::Generator::take_phase_nanos();
+        let ms = |v: u64| v as f64 / chunks as f64 / 1e6;
+        tracing::info!(
+            target: "mcrs::worldgen",
+            "fill phases ms/chunk: aquifer setup {:.2}, density {:.2}, blocks+aquifer {:.2}, surface {:.2}, output {:.2}",
+            ms(p[0]), ms(p[1]), ms(p[2]), ms(p[3]), ms(p[4])
+        );
     }
 }
