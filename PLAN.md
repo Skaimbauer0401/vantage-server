@@ -376,6 +376,18 @@ Tried, exact, but no measurable gain (run-to-run noise is ±5%), so not kept:
 Remaining levers are large ports, each worth ~5–15%: light engine (also lifts the serial cap),
 carvers into the Rust fill (they already have the aquifer and surface rules there), biomes, features.
 
+**Light engine (next, in progress):** only ~4-6k propagation steps per chunk (sky inc 3.3-5.1k,
+block inc 0.6-1.4k, decreases ~40), yet ~2.7 ms/chunk on the serial light executor (~300-500 ns per
+step); 60% is `propagateIncreases`, dominated by per-neighbor section-map lookups
+(`storingLightForSection`/`getStoredLevel`), `getState` chunk lookups, and `setStoredLevel`'s
+`LongOpenHashSet` adds. Vanilla's result depends on its storage model (sections without data repeat the
+row above), so the plan is the same algorithm with flat caches, not an idealized engine:
+1. Rewrite `propagateIncreases` + Sky/Block `propagateIncrease` with per-batch section and chunk-section
+   caches (coherent: during propagation the maps only change through `copyDataLayer`), skipping
+   duplicate `sectionsAffectedByLightUpdates` adds (no-op adds, same hash set).
+2. Verify with a shadow vanilla `LevelLightEngine` fed the same calls; compare data layers after every
+   `runLightUpdates`.
+
 ## 11. Next Steps
 
 1. Density function framework (`densityfunction/*`, ~4300 lines): parse the vanilla datapack's
