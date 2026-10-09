@@ -192,8 +192,8 @@ fn block_counts(container: &Compound<'_>, ids: &[i32], flags: &[u8]) -> Option<[
         }
         let mask = (1u64 << bits) - 1;
         let mut remaining = SECTION_BLOCKS;
-        for word in raw.chunks_exact(8) {
-            let mut word = u64::from_be_bytes(word.try_into().unwrap());
+        for word in raw.as_chunks::<8>().0 {
+            let mut word = u64::from_be_bytes(*word);
             for _ in 0..per_long.min(remaining) {
                 let index = (word & mask) as usize;
                 if index >= ids.len() {

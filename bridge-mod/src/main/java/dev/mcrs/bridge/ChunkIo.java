@@ -110,7 +110,7 @@ public final class ChunkIo {
 	}
 
 	/** Per-state counter flags, mirroring {@code LevelChunkSection$1BlockCounter.accept}. */
-	private static byte stateFlags(BlockState state) {
+	static byte stateFlags(BlockState state) {
 		if (state.isAir()) {
 			return 0;
 		}

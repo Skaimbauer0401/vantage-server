@@ -3,6 +3,8 @@
 //! Every module is checked against vanilla itself: `tools/oracle` runs vanilla's
 //! classes and writes reference values that the tests in `tests/` compare against.
 
+pub mod density;
+pub mod fill;
 pub mod jmath;
 pub mod noise;
 pub mod random;

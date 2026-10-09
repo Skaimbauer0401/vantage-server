@@ -5,8 +5,12 @@
 	"server": [
 		"CommandsMixin",
 		"IOWorkerMixin",
+		"LevelChunkSectionAccessor",
 		"LevelChunkSectionMixin",
 		"MinecraftServerMixin",
+		"NoiseBasedChunkGeneratorMixin",
+		"NoiseChunkAccessor",
+		"PalettedContainerAccessor",
 		"PalettedContainerFactoryMixin",
 		"SerializableChunkDataMixin"
 	],

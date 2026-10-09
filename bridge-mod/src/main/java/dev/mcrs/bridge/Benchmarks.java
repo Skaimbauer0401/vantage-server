@@ -119,6 +119,10 @@ public final class Benchmarks {
 			}
 			report(source, String.format(Locale.ROOT, "[bench] chunks: %d full chunks in %.2f s = %.1f chunks/s (center %d %d, %s)",
 					loaded, seconds, loaded / seconds, pos.x(), pos.z(), generate ? "generated" : "loaded"));
+			report(source, String.format(Locale.ROOT, "[bench] terrain: %d filled by Rust, %d by vanilla%s",
+					TerrainFill.FILLED.getAndSet(0), TerrainFill.SKIPPED.getAndSet(0),
+					TerrainFill.VERIFY ? String.format(Locale.ROOT, ", verify: %d compared, %d differ",
+							TerrainFill.VERIFIED.get(), TerrainFill.MISMATCHED.get()) : ""));
 			if (ChunkIo.VERIFY) {
 				report(source, String.format(Locale.ROOT, "[bench] chunk io verify: %d containers compared, %d mismatches",
 						ChunkIo.VERIFIED.get(), ChunkIo.MISMATCHES.get()));

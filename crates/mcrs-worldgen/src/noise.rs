@@ -4,6 +4,8 @@
 //! and the vectorized `add_to_volume` paths round differently in vanilla (dot
 //! products are summed in a different order), so both are ported as written.
 
+use std::sync::Arc;
+
 use crate::jmath;
 use crate::random::{ForkingRandom, PositionalRandomFactory, RandomSource};
 
@@ -55,6 +57,44 @@ impl DensityVolume {
 
     pub fn index_unchecked(&self, x: i32, y: i32, z: i32) -> usize {
         (y + (x + z * self.size_x) * self.size_y) as usize
+    }
+
+    pub fn max_block_x(&self) -> i32 {
+        self.min_x + self.size_x * self.step_x - 1
+    }
+
+    pub fn max_block_y(&self) -> i32 {
+        self.min_y + self.size_y * self.step_y - 1
+    }
+
+    pub fn max_block_z(&self) -> i32 {
+        self.min_z + self.size_z * self.step_z - 1
+    }
+
+    /// `DensityVolume.indexOfBlock`: index of a block position, if it's a grid point.
+    pub fn index_of_block(&self, x: i32, y: i32, z: i32) -> Option<usize> {
+        let (rx, ry, rz) = (x - self.min_x, y - self.min_y, z - self.min_z);
+        if self.step_x == 1 && self.step_y == 1 && self.step_z == 1 {
+            if rx >= 0 && ry >= 0 && rz >= 0 && rx < self.size_x && ry < self.size_y && rz < self.size_z {
+                return Some(self.index_unchecked(rx, ry, rz));
+            }
+        } else if rx >= 0
+            && ry >= 0
+            && rz >= 0
+            && rx < self.size_x * self.step_x
+            && ry < self.size_y * self.step_y
+            && rz < self.size_z * self.step_z
+            && rx.rem_euclid(self.step_x) == 0
+            && ry.rem_euclid(self.step_y) == 0
+            && rz.rem_euclid(self.step_z) == 0
+        {
+            return Some(self.index_unchecked(
+                rx.div_euclid(self.step_x),
+                ry.div_euclid(self.step_y),
+                rz.div_euclid(self.step_z),
+            ));
+        }
+        None
     }
 }
 
@@ -175,6 +215,11 @@ pub struct GradientBase {
 }
 
 impl GradientBase {
+    /// From state exported by the server (permutation table and offsets).
+    pub fn from_parts(perms: [u8; 256], offset_x: f64, offset_y: f64, offset_z: f64) -> GradientBase {
+        GradientBase { perms, offset_x, offset_y, offset_z }
+    }
+
     pub fn new(random: &mut impl RandomSource, offset_scale: f64) -> GradientBase {
         let offset_x = random.next_double() * offset_scale;
         let offset_y = random.next_double() * offset_scale;
@@ -505,7 +550,7 @@ impl Noise for SimplexNoise {
 
 /// One layer of a [`NoiseStack`].
 pub struct Layer {
-    pub noise: Box<dyn Noise>,
+    pub noise: Arc<dyn Noise>,
     pub frequency: f64,
     pub amplitude: f32,
 }
@@ -518,7 +563,7 @@ pub struct NoiseStack {
 
 impl NoiseStack {
     pub fn add(&mut self, noise: impl Noise + 'static, frequency: f64, amplitude: f32) {
-        self.layers.push(Layer { noise: Box::new(noise), frequency, amplitude });
+        self.layers.push(Layer { noise: Arc::new(noise), frequency, amplitude });
     }
 }
 

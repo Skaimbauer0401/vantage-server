@@ -9,7 +9,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 pub const MAGIC: u64 = u64::from_le_bytes(*b"MCRSBRDG");
-pub const ABI_VERSION: u32 = 3;
+pub const ABI_VERSION: u32 = 4;
 
 #[repr(C)]
 pub struct BridgeTable {
@@ -26,17 +26,23 @@ pub struct BridgeTable {
     pub read_chunk: extern "C" fn(*const u8, usize, i32, i32, i32, *mut *mut u8, *mut usize) -> i32,
     /// See [`crate::chunk_io::free_buffer`].
     pub free_buffer: extern "C" fn(*mut u8, usize),
+    /// See [`crate::worldgen::wg_load`].
+    pub wg_load: extern "C" fn(*const u8, usize) -> i64,
+    /// See [`crate::worldgen::wg_fill`].
+    pub wg_fill: extern "C" fn(i64, i32, i32, i32, i32, *mut *mut u8, *mut usize) -> i32,
 }
 
 pub static BRIDGE: BridgeTable = BridgeTable {
     magic: MAGIC,
     abi_version: ABI_VERSION,
-    fn_count: 5,
+    fn_count: 7,
     log: bridge_log,
     on_tick: bridge_on_tick,
     set_registry: crate::chunk_io::set_registry,
     read_chunk: crate::chunk_io::read_chunk,
     free_buffer: crate::chunk_io::free_buffer,
+    wg_load: crate::worldgen::wg_load,
+    wg_fill: crate::worldgen::wg_fill,
 };
 
 /// Address passed to Java as `-Dmcrs.bridge=<address>`.
@@ -87,6 +93,7 @@ pub fn spawn_tick_reporter(interval: Duration) {
                 max as f64 / 1e6
             );
             crate::chunk_io::report_stats();
+            crate::worldgen::report_stats();
         })
         .expect("spawn tick reporter");
 }

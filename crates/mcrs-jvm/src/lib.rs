@@ -5,6 +5,7 @@
 
 pub mod bridge;
 mod chunk_io;
+mod worldgen;
 
 use std::ffi::{c_void, CString};
 use std::path::{Path, PathBuf};

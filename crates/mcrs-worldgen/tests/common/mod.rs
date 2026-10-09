@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 //! Compares Rust output with reference values written by `tools/oracle` (vanilla).
 
 use std::fmt::Display;

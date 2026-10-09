@@ -14,11 +14,11 @@ import java.nio.charset.StandardCharsets;
  * is bound as a Panama FFM downcall. Keep the layout in sync with the Rust struct.
  */
 public final class NativeBridge {
-	public static final int ABI_VERSION = 3;
+	public static final int ABI_VERSION = 4;
 
 	private static final String MAGIC = "MCRSBRDG";
 	private static final long HEADER_SIZE = 16;
-	private static final int FN_COUNT = 5;
+	private static final int FN_COUNT = 7;
 
 	public static final int TRACE = 0, DEBUG = 1, INFO = 2, WARN = 3, ERROR = 4;
 
@@ -27,6 +27,8 @@ public final class NativeBridge {
 	private static MethodHandle setRegistry;
 	private static MethodHandle readChunk;
 	private static MethodHandle freeBuffer;
+	private static MethodHandle wgLoad;
+	private static MethodHandle wgFill;
 
 	private NativeBridge() {
 	}
@@ -62,6 +64,11 @@ public final class NativeBridge {
 				ValueLayout.ADDRESS, ValueLayout.ADDRESS));
 		freeBuffer = linker.downcallHandle(fn(table, 4),
 				FunctionDescriptor.ofVoid(ValueLayout.ADDRESS, ValueLayout.JAVA_LONG), Linker.Option.critical(false));
+		wgLoad = linker.downcallHandle(fn(table, 5),
+				FunctionDescriptor.of(ValueLayout.JAVA_LONG, ValueLayout.ADDRESS, ValueLayout.JAVA_LONG));
+		wgFill = linker.downcallHandle(fn(table, 6), FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_LONG,
+				ValueLayout.JAVA_INT, ValueLayout.JAVA_INT, ValueLayout.JAVA_INT, ValueLayout.JAVA_INT, ValueLayout.ADDRESS,
+				ValueLayout.ADDRESS));
 		return true;
 	}
 
@@ -136,4 +143,39 @@ public final class NativeBridge {
 	}
 
 	private static final byte[] EMPTY = new byte[0];
+
+	/** Loads a worldgen export; returns a generator handle, or 0 if Rust can't handle it. */
+	public static long wgLoad(byte[] json) {
+		try (Arena arena = Arena.ofConfined()) {
+			return (long) wgLoad.invokeExact(arena.allocateFrom(ValueLayout.JAVA_BYTE, json), (long) json.length);
+		} catch (Throwable t) {
+			throw new RuntimeException(t);
+		}
+	}
+
+	/**
+	 * Fills a chunk in Rust. Returns the result buffer (caller must {@link #free} it), or
+	 * null if Rust failed and vanilla should fill the chunk.
+	 */
+	public static MemorySegment wgFill(long handle, int chunkX, int chunkZ, int minY, int height) {
+		try (Arena arena = Arena.ofConfined()) {
+			MemorySegment out = arena.allocate(ValueLayout.ADDRESS);
+			MemorySegment outLen = arena.allocate(ValueLayout.JAVA_LONG);
+			int result = (int) wgFill.invokeExact(handle, chunkX, chunkZ, minY, height, out, outLen);
+			if (result != 1) {
+				return null;
+			}
+			return out.get(ValueLayout.ADDRESS, 0).reinterpret(outLen.get(ValueLayout.JAVA_LONG, 0));
+		} catch (Throwable t) {
+			throw new RuntimeException(t);
+		}
+	}
+
+	public static void free(MemorySegment buffer) {
+		try {
+			freeBuffer.invokeExact(buffer, buffer.byteSize());
+		} catch (Throwable t) {
+			throw new RuntimeException(t);
+		}
+	}
 }
