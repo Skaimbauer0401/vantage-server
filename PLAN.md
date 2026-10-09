@@ -339,6 +339,27 @@ with `-XX:-UseLibmIntrinsic` (config `deterministic_math`), which makes `Math` e
 products in different orders (both ported as written); `NormalNoise` uses `DoubleStream.sum`
 (Kahan summation).
 
+**Phase 3b: generation speed (current).** Measured with `tools/bench/gen.sh` (fresh world, fixed
+seed, four fixed areas), vanilla and mcrs back to back:
+
+| Area | Vanilla | mcrs |
+|---|---|---|
+| 1 (cold JIT) | 69.6 chunks/s | 117.0 chunks/s |
+| 2 | 80.8 | 164.5 |
+| 3 | 107.2 | 194.5 |
+| 4 | 119.1 | 253.1 (2.1×) |
+
+What got it there:
+- **Parallel features:** vanilla runs the FEATURES step on one serial executor (workers were ~6.5 of
+  15 busy). It now runs on the worker pool behind a lock over the 3×3 chunks and every structure
+  start it touches; the shared `StructureTemplate$Palette` cache is made concurrent. Vanilla's own
+  output already depends on feature order (two vanilla runs differ in 2,643 of 4,357 chunks); every
+  parallel result is an order vanilla could also produce.
+- **Terrain fill and surface in Rust:** `doFill`, aquifer, Beardifier and `MaterialSystem` run
+  in Rust, verified identical to vanilla (blocks, heightmaps, post-processing, density caches,
+  aquifer state) on 4,050+ chunks. On their own they're about as fast as Java's JIT;
+  the gain comes from skipping Java's per-block `setBlockState` path and exact shortcuts.
+
 ## 11. Next Steps
 
 1. Density function framework (`densityfunction/*`, ~4300 lines): parse the vanilla datapack's
