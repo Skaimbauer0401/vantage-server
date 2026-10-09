@@ -22,7 +22,8 @@ public abstract class ChunkStatusTasksMixin {
 		if (!ParallelFeatures.ENABLED || ParallelFeatures.BYPASS.get()) {
 			return;
 		}
-		cir.setReturnValue(ParallelFeatures.run(context.level(), chunk.getPos(), net.minecraft.util.Util.backgroundExecutor(),
+		cir.setReturnValue(ParallelFeatures.run(context.level(), chunk.getPos(), ParallelFeatures.structureStarts(chunk),
+				net.minecraft.util.Util.backgroundExecutor(),
 				() -> ChunkStatusTasks.generateFeatures(context, step, chunks, chunk).join()));
 	}
 }
