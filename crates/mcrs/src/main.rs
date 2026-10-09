@@ -23,7 +23,11 @@ fn main() -> Result<()> {
 
     let project_dir = std::env::current_dir()?;
     let config = Config::load_or_create(&project_dir)?;
-    let run_dir = project_dir.join(&config.run_dir);
+    // MCRS_RUN_DIR: a separate server directory, e.g. for reproducible benchmarks.
+    let run_dir = match std::env::var_os("MCRS_RUN_DIR") {
+        Some(dir) => std::path::PathBuf::from(dir),
+        None => project_dir.join(&config.run_dir),
+    };
     std::fs::create_dir_all(&run_dir)?;
 
     let java_home = setup::find_java_home(&config, &project_dir)?;

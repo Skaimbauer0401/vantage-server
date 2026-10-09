@@ -33,6 +33,9 @@ public final class Benchmarks {
 	private static final int ENTITY_AREA_RADIUS_CHUNKS = 4;
 	private static final int ENTITY_SPREAD_BLOCKS = 24;
 
+	/** Nanoseconds spent in ThreadedLevelLightEngine.runUpdate (serial per dimension). */
+	public static final java.util.concurrent.atomic.AtomicLong LIGHT_NANOS = new java.util.concurrent.atomic.AtomicLong();
+
 	private static boolean running;
 	private static EntityBench entityBench;
 
@@ -101,6 +104,7 @@ public final class Benchmarks {
 				generate ? "generating" : "loading", radius, pos.x(), pos.z()));
 
 		long start = System.nanoTime();
+		LIGHT_NANOS.set(0);
 		cache.addTicketAndLoadWithRadius(TicketType.FORCED, pos, radius).whenComplete((ignored, error) -> server.execute(() -> {
 			double seconds = (System.nanoTime() - start) / 1e9;
 			int loaded = 0;
@@ -119,6 +123,8 @@ public final class Benchmarks {
 			}
 			report(source, String.format(Locale.ROOT, "[bench] chunks: %d full chunks in %.2f s = %.1f chunks/s (center %d %d, %s)",
 					loaded, seconds, loaded / seconds, pos.x(), pos.z(), generate ? "generated" : "loaded"));
+			report(source, String.format(Locale.ROOT, "[bench] light engine busy %.2f s of %.2f s (%.0f%%)",
+					LIGHT_NANOS.get() / 1e9, seconds, 100 * LIGHT_NANOS.get() / 1e9 / seconds));
 			report(source, String.format(Locale.ROOT, "[bench] terrain: %d filled by Rust, %d by vanilla%s",
 					TerrainFill.FILLED.getAndSet(0), TerrainFill.SKIPPED.getAndSet(0),
 					TerrainFill.VERIFY ? String.format(Locale.ROOT, ", verify: %d compared, %d differ",

@@ -12,7 +12,8 @@
 		"NoiseChunkAccessor",
 		"PalettedContainerAccessor",
 		"PalettedContainerFactoryMixin",
-		"SerializableChunkDataMixin"
+		"SerializableChunkDataMixin",
+		"ThreadedLevelLightEngineMixin"
 	],
 	"injectors": {
 		"defaultRequire": 1
