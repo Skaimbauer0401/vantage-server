@@ -210,6 +210,10 @@ public final class TerrainFill {
 			for (int dz = -1; dz <= 1; dz++) {
 				for (int dx = -1; dx <= 1; dx++) {
 					ChunkAccess c = region.getChunk(pos.x() + dx, pos.z() + dz);
+					if (fastBiomes(c, chunk, quartHeight)) {
+						i = copyBiomeIds(c, ids, quartHeight, params, i);
+						continue;
+					}
 					int qx0 = (pos.x() + dx) << 2;
 					int qz0 = (pos.z() + dz) << 2;
 					for (int qy = 0; qy < quartHeight; qy++) {
@@ -223,6 +227,40 @@ public final class TerrainFill {
 			}
 		}
 		return params;
+	}
+
+	/**
+	 * Whether {@link #copyBiomeIds} gives what {@code getNoiseBiome} would for every quart of
+	 * {@code c}: biomes exist (else vanilla throws) and the height range matches the center.
+	 */
+	private static boolean fastBiomes(ChunkAccess c, ChunkAccess center, int quartHeight) {
+		return (!(c instanceof ProtoChunk proto) || proto.getHighestGeneratedStatus().isOrAfter(net.minecraft.world.level.chunk.status.ChunkStatus.BIOMES))
+				&& c.getMinY() == center.getMinY() && c.getHeight() == center.getHeight() && (quartHeight & 3) == 0
+				&& c.getSections().length == quartHeight >> 2;
+	}
+
+	/** Biome ids of {@code c} in quart y, z, x order, read straight from the section containers. */
+	private static int copyBiomeIds(ChunkAccess c, net.minecraft.core.IdMap<net.minecraft.core.Holder<net.minecraft.world.level.biome.Biome>> ids,
+			int quartHeight, int[] params, int i) {
+		net.minecraft.core.Holder<net.minecraft.world.level.biome.Biome> last = null;
+		int lastId = 0;
+		LevelChunkSection[] sections = c.getSections();
+		for (LevelChunkSection section : sections) {
+			var biomes = section.getBiomes();
+			for (int y = 0; y < 4; y++) {
+				for (int z = 0; z < 4; z++) {
+					for (int x = 0; x < 4; x++) {
+						var biome = biomes.get(x, y, z);
+						if (biome != last) {
+							last = biome;
+							lastId = ids.getId(biome);
+						}
+						params[i++] = lastId;
+					}
+				}
+			}
+		}
+		return i;
 	}
 
 	/** A parsed Rust fill result. */
@@ -254,9 +292,8 @@ public final class TerrainFill {
 				if (palette.length > 0) {
 					sectionCounts.add(ints(4));
 					long[] data = new long[i()];
-					for (int k = 0; k < data.length; k++) {
-						data[k] = l();
-					}
+					MemorySegment.copy(buffer, LONG, offset, data, 0, data.length);
+					offset += 8L * data.length;
 					sectionData.add(data);
 				} else {
 					sectionCounts.add(null);
@@ -275,9 +312,8 @@ public final class TerrainFill {
 					int[] v = ints(9);
 					cell.volume = new DensityVolume(v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7], v[8]);
 					cell.buffer = new float[i()];
-					for (int k = 0; k < cell.buffer.length; k++) {
-						cell.buffer[k] = f();
-					}
+					MemorySegment.copy(buffer, FLOAT, offset, cell.buffer, 0, cell.buffer.length);
+					offset += 4L * cell.buffer.length;
 				}
 				cell.valueKey = l();
 				cell.value = f();
@@ -338,9 +374,8 @@ public final class TerrainFill {
 		}
 
 		private void readInto(int[] values) {
-			for (int k = 0; k < values.length; k++) {
-				values[k] = i();
-			}
+			MemorySegment.copy(buffer, INT, offset, values, 0, values.length);
+			offset += 4L * values.length;
 		}
 
 		@Override
