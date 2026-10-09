@@ -1,0 +1,24 @@
+[workspace]
+resolver = "2"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+
+[workspace.dependencies]
+mcrs-jvm = { path = "crates/mcrs-jvm" }
+mcrs-chunk = { path = "crates/mcrs-chunk" }
+anyhow = "1"
+jni = "0.21"
+libloading = "0.8"
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+ureq = "2"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1

@@ -1,0 +1,14 @@
+[package]
+name = "mcrs-chunk"
+description = "Anvil region files and chunk (de)compression"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+flate2 = { version = "1", default-features = false, features = ["zlib-rs"] }
+lz4_flex = { version = "0.11", default-features = false, features = ["std"] }
+thiserror = "2"
+
+[dev-dependencies]
+rayon = "1"

@@ -1,0 +1,6 @@
+/target
+/.tools
+/run
+/bridge-mod/build
+/bridge-mod/.gradle
+/bridge-mod/run

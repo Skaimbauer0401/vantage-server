@@ -1,0 +1,18 @@
+{
+	"required": true,
+	"package": "dev.mcrs.bridge.mixin",
+	"compatibilityLevel": "JAVA_25",
+	"server": [
+		"CommandsMixin",
+		"IOWorkerMixin",
+		"MinecraftServerMixin",
+		"PalettedContainerFactoryMixin",
+		"SerializableChunkDataMixin"
+	],
+	"injectors": {
+		"defaultRequire": 1
+	},
+	"overwrites": {
+		"requireAnnotations": true
+	}
+}
