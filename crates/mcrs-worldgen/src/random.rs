@@ -428,3 +428,77 @@ impl ForkingRandom for XoroshiroRandom {
         self.fork_positional()
     }
 }
+
+/// Either random source, as chosen per dimension (`legacy_random_source`).
+#[derive(Debug, Clone)]
+pub enum AnyRandom {
+    Legacy(LegacyRandom),
+    Xoroshiro(XoroshiroRandom),
+}
+
+impl RandomSource for AnyRandom {
+    fn next_int(&mut self) -> i32 {
+        match self {
+            AnyRandom::Legacy(r) => r.next_int(),
+            AnyRandom::Xoroshiro(r) => r.next_int(),
+        }
+    }
+    fn next_int_bounded(&mut self, bound: i32) -> i32 {
+        match self {
+            AnyRandom::Legacy(r) => r.next_int_bounded(bound),
+            AnyRandom::Xoroshiro(r) => r.next_int_bounded(bound),
+        }
+    }
+    fn next_long(&mut self) -> i64 {
+        match self {
+            AnyRandom::Legacy(r) => r.next_long(),
+            AnyRandom::Xoroshiro(r) => r.next_long(),
+        }
+    }
+    fn next_boolean(&mut self) -> bool {
+        match self {
+            AnyRandom::Legacy(r) => r.next_boolean(),
+            AnyRandom::Xoroshiro(r) => r.next_boolean(),
+        }
+    }
+    fn next_float(&mut self) -> f32 {
+        match self {
+            AnyRandom::Legacy(r) => r.next_float(),
+            AnyRandom::Xoroshiro(r) => r.next_float(),
+        }
+    }
+    fn next_double(&mut self) -> f64 {
+        match self {
+            AnyRandom::Legacy(r) => r.next_double(),
+            AnyRandom::Xoroshiro(r) => r.next_double(),
+        }
+    }
+    fn next_gaussian(&mut self) -> f64 {
+        match self {
+            AnyRandom::Legacy(r) => r.next_gaussian(),
+            AnyRandom::Xoroshiro(r) => r.next_gaussian(),
+        }
+    }
+    fn consume_count(&mut self, rounds: i32) {
+        match self {
+            AnyRandom::Legacy(r) => r.consume_count(rounds),
+            AnyRandom::Xoroshiro(r) => r.consume_count(rounds),
+        }
+    }
+}
+
+/// Either positional random factory.
+#[derive(Debug, Clone, Copy)]
+pub enum AnyPositional {
+    Legacy(LegacyPositionalFactory),
+    Xoroshiro(XoroshiroPositionalFactory),
+}
+
+impl AnyPositional {
+    pub fn at(&self, x: i32, y: i32, z: i32) -> AnyRandom {
+        match self {
+            AnyPositional::Legacy(f) => AnyRandom::Legacy(LegacyPositionalFactory::at(f, x, y, z)),
+            AnyPositional::Xoroshiro(f) => AnyRandom::Xoroshiro(XoroshiroPositionalFactory::at(f, x, y, z)),
+        }
+    }
+}

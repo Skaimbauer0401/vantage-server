@@ -65,23 +65,54 @@ public final class TerrainFill {
 
 	/** Generator handle per RandomState; 0 = unsupported (vanilla). */
 	private static final Map<RandomState, Long> HANDLES = new IdentityHashMap<>();
+	/** RandomStates whose surface step runs in Rust too. */
+	private static final java.util.Set<RandomState> SURFACE_IN_RUST = java.util.Collections.newSetFromMap(new IdentityHashMap<>());
+
+	/** BiomeManager of each chunk being built (captured in buildTerrain, used by doFill). */
+	public static final Map<ChunkAccess, net.minecraft.world.level.biome.BiomeManager> BIOME_MANAGERS =
+			new java.util.concurrent.ConcurrentHashMap<>();
+	/** Chunks whose surface Rust already built; buildSurface skips them. */
+	public static final java.util.Set<ChunkAccess> SURFACE_DONE = java.util.concurrent.ConcurrentHashMap.newKeySet();
 
 	private TerrainFill() {
 	}
 
-	private static synchronized long handle(RandomState randomState, NoiseGeneratorSettings settings) {
+	private static synchronized long handle(RandomState randomState, NoiseGeneratorSettings settings, ChunkAccess chunk) {
 		Long handle = HANDLES.get(randomState);
 		if (handle == null) {
-			var json = Worldgen.export(randomState, settings);
+			var json = Worldgen.export(randomState, settings, biomeIds(chunk));
 			handle = json == null ? 0L : NativeBridge.wgLoad(json.toString().getBytes(StandardCharsets.UTF_8));
 			HANDLES.put(randomState, handle);
+			if (handle != 0 && json.has("surface")) {
+				SURFACE_IN_RUST.add(randomState);
+			}
 		}
 		return handle;
 	}
 
+	@SuppressWarnings("unchecked")
+	private static net.minecraft.core.IdMap<net.minecraft.core.Holder<net.minecraft.world.level.biome.Biome>> biomeIds(ChunkAccess chunk) {
+		Object biomes = chunk.getSection(0).getBiomes();
+		return ((PalettedContainerAccessor<net.minecraft.core.Holder<net.minecraft.world.level.biome.Biome>>) biomes).mcrs$strategy().globalMap();
+	}
+
+	/** Whether Rust builds the surface for chunks of this RandomState. */
+	public static synchronized boolean surfaceInRust(NoiseChunk noiseChunk) {
+		return SURFACE_IN_RUST.contains(((NoiseChunkAccessor) noiseChunk).mcrs$randomState());
+	}
+
+	/** Like {@link #surfaceInRust(NoiseChunk)}, loading the dimension first if needed. */
+	public static boolean surfaceInRust(NoiseChunk noiseChunk, ChunkAccess chunk, NoiseGeneratorSettings settings) {
+		if (Worldgen.ENABLED && NativeBridge.isAvailable()) {
+			handle(((NoiseChunkAccessor) noiseChunk).mcrs$randomState(), settings, chunk);
+		}
+		return surfaceInRust(noiseChunk);
+	}
+
 	/** Returns true if Rust filled the chunk; false means vanilla's doFill must run. */
-	public static boolean tryFill(NoiseChunk noiseChunk, ChunkAccess chunk, NoiseGeneratorSettings settings) {
-		Result result = compute(noiseChunk, chunk, settings);
+	public static boolean tryFill(NoiseChunk noiseChunk, ChunkAccess chunk, NoiseGeneratorSettings settings,
+			net.minecraft.world.level.chunk.ChunkGenerator generator) {
+		Result result = compute(noiseChunk, chunk, settings, generator);
 		if (result == null) {
 			SKIPPED.incrementAndGet();
 			return false;
@@ -90,6 +121,9 @@ public final class TerrainFill {
 			result.applyBlocks(chunk);
 			result.applyHeightmapsAndPostProcessing(chunk);
 			result.applyState(noiseChunk);
+			if (result.surfaceDone) {
+				SURFACE_DONE.add(chunk);
+			}
 		} finally {
 			result.close();
 		}
@@ -98,8 +132,9 @@ public final class TerrainFill {
 	}
 
 	/** Verify mode: vanilla already filled the chunk; compare Rust's result with it. */
-	public static void verify(NoiseChunk noiseChunk, ChunkAccess chunk, NoiseGeneratorSettings settings) {
-		Result result = compute(noiseChunk, chunk, settings);
+	public static void verify(NoiseChunk noiseChunk, ChunkAccess chunk, NoiseGeneratorSettings settings,
+			net.minecraft.world.level.chunk.ChunkGenerator generator) {
+		Result result = compute(noiseChunk, chunk, settings, generator);
 		if (result == null) {
 			return;
 		}
@@ -115,12 +150,13 @@ public final class TerrainFill {
 		}
 	}
 
-	private static Result compute(NoiseChunk noiseChunk, ChunkAccess chunk, NoiseGeneratorSettings settings) {
+	private static Result compute(NoiseChunk noiseChunk, ChunkAccess chunk, NoiseGeneratorSettings settings,
+			net.minecraft.world.level.chunk.ChunkGenerator generator) {
 		if (!Worldgen.ENABLED || !NativeBridge.isAvailable()) {
 			return null;
 		}
 		RandomState randomState = ((NoiseChunkAccessor) noiseChunk).mcrs$randomState();
-		long handle = handle(randomState, settings);
+		long handle = handle(randomState, settings, chunk);
 		if (handle == 0) {
 			return null;
 		}
@@ -139,8 +175,54 @@ public final class TerrainFill {
 			}
 		}
 		ChunkPos pos = chunk.getPos();
-		MemorySegment buffer = NativeBridge.wgFill(handle, pos.x(), pos.z(), volume.minBlockY(), volume.sizeY(), beard);
+		int[] params = params(chunk, settings, generator, surfaceInRust(noiseChunk));
+		MemorySegment buffer = NativeBridge.wgFill(handle, pos.x(), pos.z(), volume.minBlockY(), volume.sizeY(), beard, params);
 		return buffer == null ? null : new Result(buffer, volume);
+	}
+
+	/** See wg_fill in crates/mcrs-jvm/src/worldgen.rs. */
+	private static int[] params(ChunkAccess chunk, NoiseGeneratorSettings settings, net.minecraft.world.level.chunk.ChunkGenerator generator,
+			boolean surface) {
+		var heights = chunk.getHeightAccessorForGeneration();
+		var context = new net.minecraft.world.level.levelgen.WorldGenerationContext(generator, heights);
+		var biomeManager = BIOME_MANAGERS.get(chunk);
+		boolean doSurface = surface && biomeManager != null;
+		int minQuartY = chunk.getMinY() >> 2;
+		int quartHeight = chunk.getHeight() >> 2;
+		int[] params = new int[12 + (doSurface ? 9 * quartHeight * 16 : 0)];
+		params[0] = chunk.getMinY();
+		params[1] = chunk.getHeight();
+		params[2] = doSurface ? 1 : 0;
+		params[3] = heights.getMinY();
+		params[4] = heights.getMaxY();
+		params[5] = context.getMinGenY();
+		params[6] = context.getGenDepth();
+		params[7] = context.seaLevel();
+		params[8] = Block.getId(settings.defaultBlock());
+		params[9] = Block.getId(net.minecraft.world.level.block.Blocks.AIR.defaultBlockState());
+		params[10] = minQuartY;
+		params[11] = quartHeight;
+		if (doSurface) {
+			var region = (net.minecraft.server.level.WorldGenRegion) Reflect.get(biomeManager, "noiseBiomeSource");
+			var ids = biomeIds(chunk);
+			ChunkPos pos = chunk.getPos();
+			int i = 12;
+			for (int dz = -1; dz <= 1; dz++) {
+				for (int dx = -1; dx <= 1; dx++) {
+					ChunkAccess c = region.getChunk(pos.x() + dx, pos.z() + dz);
+					int qx0 = (pos.x() + dx) << 2;
+					int qz0 = (pos.z() + dz) << 2;
+					for (int qy = 0; qy < quartHeight; qy++) {
+						for (int qz = 0; qz < 4; qz++) {
+							for (int qx = 0; qx < 4; qx++) {
+								params[i++] = ids.getId(c.getNoiseBiome(qx0 + qx, minQuartY + qy, qz0 + qz));
+							}
+						}
+					}
+				}
+			}
+		}
+		return params;
 	}
 
 	/** A parsed Rust fill result. */
@@ -149,6 +231,7 @@ public final class TerrainFill {
 		private final DensityVolume volume;
 		private long offset;
 
+		final boolean surfaceDone;
 		private final List<int[]> sectionPalettes = new ArrayList<>();
 		private final List<int[]> sectionCounts = new ArrayList<>();
 		private final List<long[]> sectionData = new ArrayList<>();
@@ -163,6 +246,7 @@ public final class TerrainFill {
 		Result(MemorySegment buffer, DensityVolume volume) {
 			this.buffer = buffer;
 			this.volume = volume;
+			this.surfaceDone = i() == 1;
 			int sections = i();
 			for (int s = 0; s < sections; s++) {
 				int[] palette = ints(i());
@@ -265,7 +349,7 @@ public final class TerrainFill {
 		}
 
 		private LevelChunkSection section(ChunkAccess chunk, int index) {
-			return chunk.getSection(chunk.getSectionIndex(volume.minBlockY()) + index);
+			return chunk.getSection(index);
 		}
 
 		void applyBlocks(ChunkAccess chunk) {

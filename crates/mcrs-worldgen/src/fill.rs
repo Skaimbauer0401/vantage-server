@@ -12,6 +12,10 @@ use std::collections::HashMap;
 use serde_json::Value;
 
 use crate::density::{Beard, CacheCell, Context, Graph, LoadError, NodeId};
+use crate::surface::{
+    ChunkBlocks, Section, Surface, SurfaceInput, STATE_BLOCKS_MOTION, STATE_COUNT_FLUID, STATE_COUNT_NON_EMPTY,
+    STATE_COUNT_TICKING_BLOCK, STATE_COUNT_TICKING_FLUID, STATE_DEFAULT_BLOCK, STATE_HAS_FLUID, STATE_WORLD_SURFACE,
+};
 use crate::noise::{floor, DensityVolume};
 use crate::random::{
     LegacyPositionalFactory, PositionalRandomFactory, RandomSource, XoroshiroPositionalFactory,
@@ -64,6 +68,9 @@ pub struct Generator {
     pub air: u32,
     pub lava: u32,
     states: HashMap<u32, StateInfo>,
+    /// `surface::STATE_*` flags per global block state id.
+    pub state_flags: Vec<u16>,
+    pub surface: Option<Surface>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -123,7 +130,26 @@ impl Generator {
             };
             states.insert(id.parse::<u32>().map_err(|_| LoadError("state id".into()))?, info);
         }
+        let mut state_flags: Vec<u16> = get(json, "state_flags")?
+            .as_array()
+            .ok_or_else(|| LoadError("state_flags".into()))?
+            .iter()
+            .map(|v| v.as_i64().unwrap_or(0) as u16)
+            .collect();
+        let surface = match json.get("surface") {
+            Some(s) => {
+                for id in get(s, "default_block_states")?.as_array().ok_or_else(|| LoadError("default_block_states".into()))? {
+                    if let Some(f) = state_flags.get_mut(id.as_i64().unwrap_or(-1) as usize) {
+                        *f |= STATE_DEFAULT_BLOCK;
+                    }
+                }
+                Some(Surface::from_json(s)?)
+            }
+            None => None,
+        };
         Ok(Generator {
+            state_flags,
+            surface,
             graph,
             final_density,
             aquifer,
@@ -581,63 +607,65 @@ impl<'a> Aquifer<'a> {
     }
 }
 
-/// One filled chunk section: vanilla's in-memory palette and 4..8-bit storage.
+/// One chunk section after generation: vanilla's in-memory palette and storage.
 #[derive(Debug, Clone, Default)]
 pub struct SectionOut {
     /// Empty when the section stays all air.
     pub palette: Vec<u32>,
     pub data: Vec<u64>,
+    /// `[nonEmpty, fluid, tickingBlock, tickingFluid]`
     pub counts: [i32; 4],
 }
 
 #[derive(Debug)]
 pub struct FillOut {
+    /// All sections of the chunk, bottom to top.
     pub sections: Vec<SectionOut>,
-    /// Per column (x + z * 16): top y and state for OCEAN_FLOOR_WG / WORLD_SURFACE_WG.
+    /// Per column (x + z * 16): highest block (y, state) that sets OCEAN_FLOOR_WG /
+    /// WORLD_SURFACE_WG; `None` keeps the heightmap at the chunk bottom.
     pub ocean_floor: [Option<(i32, u32)>; 256],
     pub world_surface: [Option<(i32, u32)>; 256],
     /// Block positions passed to `markPosForPostProcessing`, in vanilla's order.
     pub post_processing: Vec<(i32, i32, i32)>,
     pub cache: Vec<CacheCell>,
-    /// Aquifer state after filling, so Java's aquifer continues exactly like vanilla's.
+    /// Aquifer state after filling, so the Java aquifer continues exactly like vanilla.
     pub aquifer: Option<AquiferState>,
+    /// Whether the surface step ran too.
+    pub surface_done: bool,
 }
 
 #[derive(Debug, Clone, Default)]
 pub struct AquiferState {
     pub status: Vec<Option<FluidStatus>>,
     pub location: Vec<Option<(i32, i32, i32)>>,
-    /// Insertion order of `surfaceLevelCache` doesn't matter (a hash map in vanilla).
+    /// Insertion order of `surfaceLevelCache` does not matter (a hash map in vanilla).
     pub surface_levels: Vec<((i32, i32), i32)>,
     pub should_schedule: bool,
 }
 
+/// Per-chunk parameters beyond the noise volume.
+pub struct FillParams<'a> {
+    pub chunk_min_y: i32,
+    pub chunk_height: i32,
+    /// Run the surface step too (needs the dimension surface export).
+    pub surface: Option<SurfaceInput<'a>>,
+}
+
 impl Generator {
-    /// `doFill` for the chunk at `chunk_x, chunk_z` over `[min_y, min_y + height)`.
-    pub fn fill(&self, chunk_x: i32, chunk_z: i32, min_y: i32, height: i32, beard: Beard) -> FillOut {
+    /// `doFill` (and, with `params.surface`, `buildSurface`) for one chunk; the noise
+    /// volume is `[min_y, min_y + height)`.
+    pub fn fill(&self, chunk_x: i32, chunk_z: i32, min_y: i32, height: i32, beard: Beard, params: &FillParams) -> FillOut {
         let volume = DensityVolume::new([16, height, 16], [chunk_x << 4, min_y, chunk_z << 4], [1, 1, 1]);
         let mut ctx = Context::new(&self.graph);
         ctx.beard = beard;
-        // NoiseChunk's constructor builds the aquifer (sampling surface levels) first.
+        // The NoiseChunk constructor builds the aquifer (sampling surface levels) first.
         let mut aquifer = match (self.aquifer, self.aquifer_random) {
             (Some(nodes), Some(random)) => Some(Aquifer::new(self, nodes, random, &mut ctx, &volume)),
             _ => None,
         };
         let density = ctx.sample_volume_new(self.final_density, &volume);
-
-        let section_count = (height / 16) as usize;
-        // Per section: palette indices (vanilla's palette starts with the initial air).
-        let mut blocks: Vec<Vec<u8>> = vec![Vec::new(); section_count];
-        let mut palettes: Vec<Vec<u32>> = vec![Vec::new(); section_count];
-        let mut out = FillOut {
-            sections: Vec::new(),
-            ocean_floor: [None; 256],
-            world_surface: [None; 256],
-            post_processing: Vec::new(),
-            cache: Vec::new(),
-            aquifer: None,
-        };
-        let mut last_info = (u32::MAX, StateInfo::default());
+        let flags = &self.state_flags;
+        let mut chunk = ChunkBlocks::new(params.chunk_min_y, params.chunk_height, self.air);
 
         for z in 0..16 {
             let bz = volume.block_z(z);
@@ -658,51 +686,92 @@ impl Generator {
                     if state == self.air {
                         continue;
                     }
-                    let section = (y / 16) as usize;
-                    if blocks[section].is_empty() {
-                        blocks[section] = vec![0u8; 4096];
-                        palettes[section] = vec![self.air];
+                    chunk.set_raw(x, by, z, state, flags);
+                    let f = flags[state as usize];
+                    // Top-down, only the first matching block moves each heightmap.
+                    if chunk.world_surface[column] == chunk.min_y && f & STATE_WORLD_SURFACE != 0 {
+                        chunk.world_surface[column] = by + 1;
                     }
-                    let palette = &mut palettes[section];
-                    let index = match palette.iter().position(|s| *s == state) {
-                        Some(i) => i,
-                        None => {
-                            assert!(palette.len() < 256, "terrain fill produced more than 256 states in a section");
-                            palette.push(state);
-                            palette.len() - 1
-                        }
-                    };
-                    blocks[section][((y & 15) * 256 + z * 16 + x) as usize] = index as u8;
-                    if last_info.0 != state {
-                        last_info = (state, self.info(state));
+                    if chunk.ocean_floor[column] == chunk.min_y && f & STATE_BLOCKS_MOTION != 0 {
+                        chunk.ocean_floor[column] = by + 1;
                     }
-                    let info = last_info.1;
-                    if out.world_surface[column].is_none() && info.world_surface {
-                        out.world_surface[column] = Some((by, state));
-                    }
-                    if out.ocean_floor[column].is_none() && info.blocks_motion {
-                        out.ocean_floor[column] = Some((by, state));
-                    }
-                    if schedule && info.has_fluid {
-                        out.post_processing.push((bx, by, bz));
+                    if schedule && f & STATE_HAS_FLUID != 0 {
+                        chunk.post_processing.push((bx, by, bz));
                     }
                 }
             }
         }
+        crate::density::recycle([density]);
 
-        out.sections = blocks
-            .iter()
-            .zip(&palettes)
-            .map(|(b, p)| if b.is_empty() { SectionOut::default() } else { self.pack_section(b, p) })
-            .collect();
-        out.cache = std::mem::take(&mut ctx.cells);
-        out.aquifer = aquifer.map(|a| AquiferState {
-            status: a.cache,
-            location: a.location_cache,
-            surface_levels: a.surface_level_cache.into_iter().collect(),
-            should_schedule: a.should_schedule,
-        });
+        let surface_done = match (&self.surface, &params.surface) {
+            (Some(surface), Some(input)) => {
+                let noises = self.graph.noises.clone();
+                surface.build(&mut ctx, &noises, flags, &mut chunk, input);
+                true
+            }
+            _ => false,
+        };
+
+        let mut out = FillOut {
+            sections: chunk.sections.iter().map(|s| s.as_ref().map_or_else(SectionOut::default, |s| self.pack_section(s))).collect(),
+            ocean_floor: [None; 256],
+            world_surface: [None; 256],
+            post_processing: std::mem::take(&mut chunk.post_processing),
+            cache: std::mem::take(&mut ctx.cells),
+            aquifer: aquifer.map(|a| AquiferState {
+                status: a.cache,
+                location: a.location_cache,
+                surface_levels: a.surface_level_cache.into_iter().collect(),
+                should_schedule: a.should_schedule,
+            }),
+            surface_done,
+        };
+        for column in 0..256usize {
+            let (x, z) = (column as i32 & 15, column as i32 >> 4);
+            let tops = [(chunk.world_surface[column], &mut out.world_surface[column]), (chunk.ocean_floor[column], &mut out.ocean_floor[column])];
+            for (height, top) in tops {
+                if height > chunk.min_y {
+                    *top = Some((height - 1, chunk.get(x, height - 1, z).unwrap_or(self.air)));
+                }
+            }
+        }
         out
+    }
+
+    /// Benchmark helper: the minimum time (ns) of `runs` surface steps on the same
+    /// filled chunk.
+    #[doc(hidden)]
+    pub fn bench_surface(&self, chunk_x: i32, chunk_z: i32, min_y: i32, height: i32, input: &SurfaceInput, runs: usize) -> u128 {
+        let volume = DensityVolume::new([16, height, 16], [chunk_x << 4, min_y, chunk_z << 4], [1, 1, 1]);
+        let mut ctx = Context::new(&self.graph);
+        let density = ctx.sample_volume_new(self.final_density, &volume);
+        let mut chunk = ChunkBlocks::new(min_y, height, self.air);
+        for z in 0..16 {
+            for x in 0..16 {
+                for y in 0..height {
+                    let d = density[volume.index_unchecked(x, y, z)];
+                    let by = volume.block_y(y);
+                    let state = if d > 0.0 { self.default_block } else if by < self.sea_level { self.default_fluid } else { continue };
+                    chunk.set_raw(x, by, z, state, &self.state_flags);
+                    let column = (x + z * 16) as usize;
+                    chunk.world_surface[column] = chunk.world_surface[column].max(by + 1);
+                    if state == self.default_block {
+                        chunk.ocean_floor[column] = chunk.ocean_floor[column].max(by + 1);
+                    }
+                }
+            }
+        }
+        let surface = self.surface.as_ref().expect("no surface");
+        let noises = self.graph.noises.clone();
+        let mut best = u128::MAX;
+        for _ in 0..runs {
+            let mut c = chunk.clone();
+            let mut ctx = Context::new(&self.graph);
+            let start = std::time::Instant::now();
+            surface.build(&mut ctx, &noises, &self.state_flags, &mut c, input);
+            best = best.min(start.elapsed().as_nanos());
+        }
+        best
     }
 
     /// Benchmark helper: only the `finalDensity` volume of a chunk, optionally profiled.
@@ -725,13 +794,18 @@ impl Generator {
         }
     }
 
-    fn pack_section(&self, indices: &[u8], palette: &[u32]) -> SectionOut {
-        // Vanilla's block configurations: 4-bit linear up to 16 entries, 5..8-bit hashmap.
+    fn pack_section(&self, section: &Section) -> SectionOut {
+        if section.non_air == 0 && section.palette.len() == 1 {
+            return SectionOut::default();
+        }
+        let palette = &section.palette;
+        // Vanilla block configurations: 4-bit linear up to 16 entries, 5..8-bit hashmap.
+        assert!(palette.len() <= 256, "more than 256 states in a generated section");
         let bits = (usize::BITS - (palette.len() - 1).leading_zeros()).max(4) as usize;
         let per_long = 64 / bits;
         let mut data = vec![0u64; 4096usize.div_ceil(per_long)];
         let mut histogram = [0i32; 256];
-        for (word, chunk) in data.iter_mut().zip(indices.chunks(per_long)) {
+        for (word, chunk) in data.iter_mut().zip(section.indices.chunks(per_long)) {
             let mut w = 0u64;
             for (i, &index) in chunk.iter().enumerate() {
                 w |= (index as u64) << (i * bits);
@@ -741,13 +815,14 @@ impl Generator {
         }
         let mut counts = [0i32; 4];
         for (state, n) in palette.iter().zip(histogram) {
-            let info = self.info(*state);
-            for (c, on) in counts.iter_mut().zip(info.counts) {
-                if on {
+            let f = self.state_flags[*state as usize];
+            let bits = [STATE_COUNT_NON_EMPTY, STATE_COUNT_FLUID, STATE_COUNT_TICKING_BLOCK, STATE_COUNT_TICKING_FLUID];
+            for (c, bit) in counts.iter_mut().zip(bits) {
+                if f & bit != 0 {
                     *c += n;
                 }
             }
         }
-        SectionOut { palette: palette.to_vec(), data, counts }
+        SectionOut { palette: palette.clone(), data, counts }
     }
 }

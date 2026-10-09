@@ -8,3 +8,4 @@ pub mod fill;
 pub mod jmath;
 pub mod noise;
 pub mod random;
+pub mod surface;

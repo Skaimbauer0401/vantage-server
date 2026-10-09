@@ -9,7 +9,9 @@ use std::sync::{Arc, RwLock};
 use std::time::Instant;
 
 use mcrs_worldgen::density::{Beard, Rigid, TerrainAdjustment};
-use mcrs_worldgen::fill::{FillOut, Generator};
+use mcrs_worldgen::fill::{FillOut, FillParams, Generator};
+use mcrs_worldgen::noise::DensityVolume;
+use mcrs_worldgen::surface::{BiomeArea, GenContext, SurfaceInput};
 
 static GENERATORS: RwLock<Vec<Arc<Generator>>> = RwLock::new(Vec::new());
 
@@ -80,7 +82,11 @@ fn parse_beard(ints: &[i32]) -> Option<Beard> {
 }
 
 /// `int wg_fill(long handle, int chunkX, int chunkZ, int minY, int height,
-///     i32* beard, size_t beardLen, u8** out, size_t* outLen)`
+///     i32* beard, size_t beardLen, i32* params, size_t paramsLen, u8** out, size_t* outLen)`
+///
+/// `params`: chunkMinY, chunkHeight, doSurface, genMinY, genMaxY, minGenY, genDepth,
+/// seaLevel, defaultBlock, plainAir, biomeMinQuartY, biomeQuartHeight, then the noise
+/// biomes of the 3x3 chunks (`[chunk][quartY][quartZ][quartX]`).
 #[allow(clippy::too_many_arguments)]
 pub extern "C" fn wg_fill(
     handle: i64,
@@ -90,6 +96,8 @@ pub extern "C" fn wg_fill(
     height: i32,
     beard: *const i32,
     beard_len: usize,
+    params: *const i32,
+    params_len: usize,
     out: *mut *mut u8,
     out_len: *mut usize,
 ) -> i32 {
@@ -108,8 +116,24 @@ pub extern "C" fn wg_fill(
         if beard.affected.is_some() {
             STRUCTURE_CHUNKS.fetch_add(1, Ordering::Relaxed);
         }
+        let p = if params_len == 0 { &[][..] } else { unsafe { std::slice::from_raw_parts(params, params_len) } };
+        if p.len() < 12 {
+            return -4;
+        }
+        let biomes = BiomeArea { chunk_x, chunk_z, min_quart_y: p[10], quart_height: p[11], ids: p[12..].iter().map(|v| *v as u32).collect() };
+        let surface = (p[2] == 1 && biomes.ids.len() == 9 * 16 * p[11] as usize).then(|| SurfaceInput {
+            biomes: &biomes,
+            gen: GenContext { min_gen_y: p[5], gen_depth: p[6], sea_level: p[7] },
+            gen_min_y: p[3],
+            gen_max_y: p[4],
+            default_block: p[8] as u32,
+            plain_air: p[9] as u32,
+            sea_level: p[7],
+            noise_volume: DensityVolume::new([16, height, 16], [chunk_x << 4, min_y, chunk_z << 4], [1, 1, 1]),
+        });
+        let fill_params = FillParams { chunk_min_y: p[0], chunk_height: p[1], surface };
         let start = Instant::now();
-        let filled = generator.fill(chunk_x, chunk_z, min_y, height, beard);
+        let filled = generator.fill(chunk_x, chunk_z, min_y, height, beard, &fill_params);
         NANOS.fetch_add(start.elapsed().as_nanos() as u64, Ordering::Relaxed);
         CHUNKS.fetch_add(1, Ordering::Relaxed);
         let bytes = write_fill(&filled).into_boxed_slice();
@@ -145,7 +169,7 @@ impl Writer {
 
 /// Layout (little-endian):
 /// ```text
-/// i32 sections; per section: i32 paletteLen, i32[paletteLen] ids,
+/// i32 surfaceDone, i32 sections (all chunk sections); per section: i32 paletteLen, i32[paletteLen] ids,
 ///     if paletteLen > 0: i32[4] counts, i32 longCount, i64[longCount]
 /// i32[256] oceanFloorY (MIN = none), i32[256] oceanFloorState,
 /// i32[256] worldSurfaceY, i32[256] worldSurfaceState
@@ -158,6 +182,7 @@ impl Writer {
 /// ```
 fn write_fill(f: &FillOut) -> Vec<u8> {
     let mut w = Writer(Vec::with_capacity(64 * 1024));
+    w.i32(f.surface_done as i32);
     w.i32(f.sections.len() as i32);
     for s in &f.sections {
         w.i32(s.palette.len() as i32);

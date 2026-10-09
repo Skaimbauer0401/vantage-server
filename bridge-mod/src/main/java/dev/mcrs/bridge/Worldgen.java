@@ -27,6 +27,8 @@ import net.minecraft.world.level.levelgen.densityfunction.DensitySampler;
 public final class Worldgen {
 	public static final boolean ENABLED = !"false".equals(System.getProperty("mcrs.worldgen"));
 	public static final boolean DUMP = Boolean.getBoolean("mcrs.worldgen.dump");
+	/** {@code mcrs.worldgen.surface=false} keeps the surface step on vanilla. */
+	public static final boolean SURFACE = !"false".equals(System.getProperty("mcrs.worldgen.surface"));
 
 	/** Export result per RandomState; null value = not supported, use vanilla. */
 	private static final Map<RandomState, JsonObject> EXPORTS = new WeakHashMap<>();
@@ -34,13 +36,14 @@ public final class Worldgen {
 	private Worldgen() {
 	}
 
-	public static synchronized JsonObject export(RandomState randomState, NoiseGeneratorSettings settings) {
+	public static synchronized JsonObject export(RandomState randomState, NoiseGeneratorSettings settings,
+			net.minecraft.core.IdMap<net.minecraft.core.Holder<net.minecraft.world.level.biome.Biome>> biomeIds) {
 		if (EXPORTS.containsKey(randomState)) {
 			return EXPORTS.get(randomState);
 		}
 		JsonObject json = null;
 		try {
-			json = build(randomState, settings);
+			json = build(randomState, settings, biomeIds);
 			if (DUMP) {
 				Path file = Path.of("mcrs-worldgen-" + EXPORTS.size() + ".json");
 				Files.writeString(file, json.toString());
@@ -55,7 +58,8 @@ public final class Worldgen {
 		return json;
 	}
 
-	private static JsonObject build(RandomState randomState, NoiseGeneratorSettings settings) {
+	private static JsonObject build(RandomState randomState, NoiseGeneratorSettings settings,
+			net.minecraft.core.IdMap<net.minecraft.core.Holder<net.minecraft.world.level.biome.Biome>> biomeIds) {
 		Map<String, DensitySampler> roots = new LinkedHashMap<>();
 		roots.put("final_density", randomState.getSampler(settings.noiseRouter().finalDensity()));
 		settings.aquifers().ifPresent(aquifer -> {
@@ -66,7 +70,8 @@ public final class Worldgen {
 			roots.put("exclusion", randomState.getSampler(aquifer.exclusion()));
 			roots.put("surface_level", randomState.getSampler(aquifer.surfaceLevel()));
 		});
-		JsonObject json = new WorldgenExport().result(roots);
+		WorldgenExport exporter = new WorldgenExport();
+		JsonObject json = exporter.result(roots);
 		json.addProperty("aquifers", settings.aquifers().isPresent());
 		if (settings.aquifers().isPresent()) {
 			json.add("aquifer_random", WorldgenExport.positional(randomState.getOrCreateRandomFactory(Identifier.withDefaultNamespace("aquifer"))));
@@ -85,6 +90,14 @@ public final class Worldgen {
 		}
 		json.add("states", states);
 		json.add("beard_kernel", beardKernel());
+		json.add("state_flags", SurfaceExport.stateFlags(Block.BLOCK_STATE_REGISTRY));
+		if (SURFACE) {
+			try {
+				json.add("surface", new SurfaceExport(exporter, randomState).surface(settings, biomeIds));
+			} catch (WorldgenExport.Unsupported e) {
+				McrsBridge.LOGGER.warn("mcrs: surface stays on vanilla for this dimension: {}", e.getMessage());
+			}
+		}
 		return json;
 	}
 
