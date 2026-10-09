@@ -10,6 +10,7 @@ license = "MIT OR Apache-2.0"
 [workspace.dependencies]
 mcrs-jvm = { path = "crates/mcrs-jvm" }
 mcrs-chunk = { path = "crates/mcrs-chunk" }
+mcrs-worldgen = { path = "crates/mcrs-worldgen" }
 anyhow = "1"
 jni = "0.21"
 libloading = "0.8"

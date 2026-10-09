@@ -23,6 +23,10 @@ pub struct Config {
     pub server_args: Vec<String>,
     /// Seconds between TPS/MSPT log lines. 0 disables.
     pub tick_report_interval_secs: u64,
+    /// Make `Math.log/exp/pow/sin/cos` use fdlibm (= StrictMath) instead of
+    /// CPU-specific intrinsics. Required for Rust worldgen to match Java bit for bit;
+    /// also makes results identical across x86 and ARM.
+    pub deterministic_math: bool,
 }
 
 impl Default for Config {
@@ -37,6 +41,7 @@ impl Default for Config {
             jvm_options: vec!["-XX:+UseZGC".into()],
             server_args: vec!["nogui".into()],
             tick_report_interval_secs: 30,
+            deterministic_math: true,
         }
     }
 }

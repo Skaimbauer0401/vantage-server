@@ -60,6 +60,10 @@ fn run_server(config: &Config, java_home: &Path) -> Result<()> {
         // Lets the bridge mod use Panama FFM downcalls without warnings.
         "--enable-native-access=ALL-UNNAMED".into(),
     ];
+    if config.deterministic_math {
+        options.push("-XX:+UnlockDiagnosticVMOptions".into());
+        options.push("-XX:-UseLibmIntrinsic".into());
+    }
     options.extend(config.jvm_options.iter().cloned());
     // One-off extras (profiling etc.) without editing mcrs.toml.
     if let Ok(extra) = std::env::var("MCRS_JVM_OPTIONS") {
