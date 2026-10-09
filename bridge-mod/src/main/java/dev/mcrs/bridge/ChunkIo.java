@@ -1,7 +1,5 @@
 package dev.mcrs.bridge;
 
-import java.io.ByteArrayInputStream;
-import java.io.DataInputStream;
 import java.io.IOException;
 import java.lang.foreign.MemorySegment;
 import java.util.ArrayList;
@@ -27,6 +25,7 @@ import net.minecraft.world.level.chunk.PalettedContainer;
 import net.minecraft.world.level.chunk.PalettedContainerFactory;
 import net.minecraft.world.level.chunk.PalettedContainerRO;
 import net.minecraft.world.level.chunk.Strategy;
+import net.minecraft.world.level.material.FluidState;
 
 /**
  * Chunk loading through Rust (crates/mcrs-jvm/src/chunk_io.rs).
@@ -42,6 +41,12 @@ import net.minecraft.world.level.chunk.Strategy;
  */
 public final class ChunkIo {
 	public static final String PALETTE_KEY = "mcrs:palette";
+	public static final String COUNTS_KEY = "mcrs:counts";
+
+	private static final int FLAG_NON_EMPTY = 1;
+	private static final int FLAG_TICKING_BLOCK = 2;
+	private static final int FLAG_FLUID = 4;
+	private static final int FLAG_TICKING_FLUID = 8;
 	public static final boolean ENABLED = !"false".equals(System.getProperty("mcrs.chunkio"));
 	public static final boolean VERIFY = Boolean.getBoolean("mcrs.chunkio.verify");
 
@@ -64,6 +69,12 @@ public final class ChunkIo {
 	public static final AtomicLong VERIFIED = new AtomicLong();
 	public static final AtomicLong MISMATCHES = new AtomicLong();
 
+	/** Rust's block counts for the block container most recently built on this thread. */
+	private record PendingCounts(PalettedContainer<BlockState> container, int[] counts) {
+	}
+
+	private static final ThreadLocal<PendingCounts> PENDING_COUNTS = new ThreadLocal<>();
+
 	private ChunkIo() {
 	}
 
@@ -78,7 +89,9 @@ public final class ChunkIo {
 		}
 		StringBuilder blocks = new StringBuilder(1 << 20);
 		IdMap<BlockState> blockIds = factory.blockStatesStrategy().globalMap();
+		byte[] flags = new byte[blockIds.size()];
 		for (BlockState state : blockIds) {
+			flags[blockIds.getId(state)] = stateFlags(state);
 			blocks.append(blockIds.getId(state)).append('\t').append(blockStateKey(state)).append('\n');
 			// Palettes store a block's default state as just its name.
 			if (state == state.getBlock().defaultBlockState() && !state.getProperties().isEmpty()) {
@@ -93,7 +106,26 @@ public final class ChunkIo {
 					biomes.append(biomeIds.getId(biome)).append('\t').append(key.identifier()).append('\n'));
 		}
 		NativeBridge.setRegistry(SharedConstants.getCurrentVersion().dataVersion().version(),
-				blocks.toString(), biomes.toString());
+				blocks.toString(), biomes.toString(), flags);
+	}
+
+	/** Per-state counter flags, mirroring {@code LevelChunkSection$1BlockCounter.accept}. */
+	private static byte stateFlags(BlockState state) {
+		if (state.isAir()) {
+			return 0;
+		}
+		int flags = FLAG_NON_EMPTY;
+		if (state.isRandomlyTicking()) {
+			flags |= FLAG_TICKING_BLOCK;
+		}
+		FluidState fluid = state.getFluidState();
+		if (!fluid.isEmpty()) {
+			flags |= FLAG_FLUID;
+			if (fluid.isRandomlyTicking()) {
+				flags |= FLAG_TICKING_FLUID;
+			}
+		}
+		return (byte) flags;
 	}
 
 	/** {@code name[k=v,...]} with properties sorted by name, matching palette.rs. */
@@ -131,7 +163,7 @@ public final class ChunkIo {
 			return Optional.empty();
 		}
 		try {
-			return Optional.of(NbtIo.read(new DataInputStream(new ByteArrayInputStream(nbt))));
+			return Optional.of(NbtIo.read(new ByteArrayDataInput(nbt)));
 		} catch (IOException e) {
 			return null;
 		}
@@ -153,6 +185,27 @@ public final class ChunkIo {
 			palette.add(value);
 		}
 		return new PalettedContainerRO.PackedData<>(palette, tag.getLongArray("data").map(LongStream::of));
+	}
+
+	/** Remembers {@code mcrs:counts} for {@code container} until its section is constructed. */
+	public static void offerCounts(PalettedContainer<BlockState> container, CompoundTag tag) {
+		int[] counts = tag.getIntArray(COUNTS_KEY).filter(c -> c.length == 4).orElse(null);
+		PENDING_COUNTS.set(counts == null ? null : new PendingCounts(container, counts));
+	}
+
+	/** Rust's counts if {@code container} is the one they were computed for, else null. */
+	public static int[] takeCounts(PalettedContainer<BlockState> container) {
+		PendingCounts pending = PENDING_COUNTS.get();
+		PENDING_COUNTS.remove();
+		return pending != null && pending.container() == container ? pending.counts() : null;
+	}
+
+	public static void verifyCounts(int[] vanilla, int[] rust) {
+		VERIFIED.incrementAndGet();
+		if (!java.util.Arrays.equals(vanilla, rust) && MISMATCHES.incrementAndGet() <= 20) {
+			McrsBridge.LOGGER.error("mcrs verify: block counts mismatch: vanilla {} vs mcrs {}",
+					java.util.Arrays.toString(vanilla), java.util.Arrays.toString(rust));
+		}
 	}
 
 	/** Verification: compares a container built by vanilla with one built from Rust's ids. */

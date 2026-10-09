@@ -8,6 +8,9 @@
 //!
 //! An entry is only resolved when it is the default-state shorthand of a known
 //! block or names one complete, valid state exactly.
+//!
+//! For resolved block palettes Rust also writes `mcrs:counts`, the four counters
+//! `LevelChunkSection.recalcBlockCounts` would compute, so Java skips that scan.
 //! Anything else (missing or extra properties, unknown blocks, old data
 //! versions) leaves the section untouched, so vanilla decodes it with all of
 //! its usual fallback behavior.
@@ -18,6 +21,17 @@ use crate::nbt::{self, Compound, Tag, TAG_COMPOUND, TAG_STRING};
 use crate::Result;
 
 pub const PALETTE_KEY: &str = "mcrs:palette";
+pub const COUNTS_KEY: &str = "mcrs:counts";
+
+/// Per-state flags (`ChunkIo.stateFlags`), mirroring `LevelChunkSection$1BlockCounter`.
+pub const FLAG_NON_EMPTY: u8 = 1;
+pub const FLAG_TICKING_BLOCK: u8 = 2;
+pub const FLAG_FLUID: u8 = 4;
+pub const FLAG_TICKING_FLUID: u8 = 8;
+
+const SECTION_BLOCKS: usize = 4096;
+/// Larger palettes use vanilla's global-palette configuration; not counted here.
+const MAX_COUNTED_PALETTE: usize = 256;
 
 /// Global id tables exported from the running server (see `RegistryExport.java`).
 #[derive(Debug, Default)]
@@ -29,6 +43,8 @@ pub struct PaletteRegistry {
     pub block_states: HashMap<Vec<u8>, i32>,
     /// biome id -> biome registry id
     pub biomes: HashMap<Vec<u8>, i32>,
+    /// `FLAG_*` bits per global block state id.
+    pub state_flags: Vec<u8>,
 }
 
 impl PaletteRegistry {
@@ -137,6 +153,11 @@ pub fn transform_chunk(
             match ids {
                 Some(ids) => {
                     stats.containers_resolved += 1;
+                    if is_blocks {
+                        if let Some(counts) = block_counts(container, &ids, &registry.state_flags) {
+                            container.insert(COUNTS_KEY, Tag::IntArrayOwned(counts.to_vec()));
+                        }
+                    }
                     replace_palette(container, ids, keep_original);
                 }
                 None => stats.containers_skipped += 1,
@@ -149,6 +170,52 @@ pub fn transform_chunk(
     let mut out = Vec::with_capacity(nbt_bytes.len());
     nbt::write_root(name, &root, &mut out);
     Ok((Some(out), stats))
+}
+
+/// `[nonEmpty, fluid, tickingBlock, tickingFluid]` for a section, or `None` when the
+/// data isn't exactly what vanilla's `PalettedContainer.unpack` accepts for a palette
+/// of this size (vanilla then counts as usual).
+fn block_counts(container: &Compound<'_>, ids: &[i32], flags: &[u8]) -> Option<[i32; 4]> {
+    if ids.len() > MAX_COUNTED_PALETTE {
+        return None;
+    }
+    let mut per_entry = [0u32; MAX_COUNTED_PALETTE];
+    if ids.len() == 1 {
+        per_entry[0] = SECTION_BLOCKS as u32;
+    } else {
+        // Vanilla's block configurations: 4-bit linear up to 16 entries, then 5..8 bits.
+        let bits = (usize::BITS - (ids.len() - 1).leading_zeros()).max(4) as usize;
+        let per_long = 64 / bits;
+        let Some(Tag::LongArray(raw)) = container.get("data") else { return None };
+        if raw.len() / 8 != SECTION_BLOCKS.div_ceil(per_long) {
+            return None;
+        }
+        let mask = (1u64 << bits) - 1;
+        let mut remaining = SECTION_BLOCKS;
+        for word in raw.chunks_exact(8) {
+            let mut word = u64::from_be_bytes(word.try_into().unwrap());
+            for _ in 0..per_long.min(remaining) {
+                let index = (word & mask) as usize;
+                if index >= ids.len() {
+                    return None;
+                }
+                per_entry[index] += 1;
+                word >>= bits;
+            }
+            remaining = remaining.saturating_sub(per_long);
+        }
+    }
+    let mut counts = [0i32; 4];
+    let order = [FLAG_NON_EMPTY, FLAG_FLUID, FLAG_TICKING_BLOCK, FLAG_TICKING_FLUID];
+    for (&id, &n) in ids.iter().zip(&per_entry) {
+        let f = *flags.get(usize::try_from(id).ok()?)?;
+        for (bit, count) in order.iter().zip(&mut counts) {
+            if f & bit != 0 {
+                *count += n as i32;
+            }
+        }
+    }
+    Some(counts)
 }
 
 fn replace_palette(container: &mut Compound<'_>, ids: Vec<i32>, keep_original: bool) {
@@ -171,6 +238,13 @@ mod tests {
                  8\tminecraft:oak_log\n20\tminecraft:chest[facing=north,type=single,waterlogged=false]\n",
             ),
             biomes: PaletteRegistry::parse_table("0\tminecraft:plains\n3\tminecraft:forest\n"),
+            state_flags: {
+                let mut flags = vec![FLAG_NON_EMPTY; 21];
+                flags[0] = 0; // air
+                flags[8] = FLAG_NON_EMPTY | FLAG_TICKING_BLOCK;
+                flags[20] = FLAG_NON_EMPTY | FLAG_FLUID | FLAG_TICKING_FLUID;
+                flags
+            },
         }
     }
 
@@ -297,5 +371,89 @@ mod tests {
         let section = root.get("sections").unwrap().as_list().unwrap().items[0].as_compound().unwrap();
         let blocks = section.get("block_states").unwrap().as_compound().unwrap();
         assert!(blocks.get("palette").is_some() && blocks.get(PALETTE_KEY).is_some());
+    }
+
+    fn section_counts(bytes: &[u8]) -> Option<Vec<i32>> {
+        let (_, root) = nbt::parse_root(bytes).unwrap();
+        let section = root.get("sections").unwrap().as_list().unwrap().items[0].as_compound().unwrap();
+        match section.get("block_states")?.as_compound()?.get(COUNTS_KEY)? {
+            Tag::IntArray(raw) => {
+                Some(raw.chunks(4).map(|c| i32::from_be_bytes(c.try_into().unwrap())).collect())
+            }
+            _ => None,
+        }
+    }
+
+    /// Packs palette indices like vanilla's `SimpleBitStorage` (big-endian on disk).
+    fn pack(indices: &[usize], bits: usize) -> &'static [u8] {
+        let mut out = Vec::new();
+        for chunk in indices.chunks(64 / bits) {
+            let mut word = 0u64;
+            for (i, &v) in chunk.iter().enumerate() {
+                word |= (v as u64) << (i * bits);
+            }
+            out.extend_from_slice(&word.to_be_bytes());
+        }
+        Box::leak(out.into_boxed_slice())
+    }
+
+    fn chunk_with_data(palette: Vec<Tag<'static>>, data: &'static [u8]) -> Vec<u8> {
+        let mut blocks = Compound::default();
+        blocks.insert("palette", Tag::List(mixed(palette)));
+        blocks.insert("data", Tag::LongArray(data));
+        let mut section = Compound::default();
+        section.insert("block_states", Tag::Compound(blocks));
+        let mut root = Compound::default();
+        root.insert("DataVersion", Tag::Int(100));
+        root.insert(
+            "sections",
+            Tag::List(List { element_type: TAG_COMPOUND, items: vec![Tag::Compound(section)] }),
+        );
+        let mut out = Vec::new();
+        nbt::write_root(b"", &root, &mut out);
+        out
+    }
+
+    #[test]
+    fn counts_blocks_like_vanilla() {
+        let indices: Vec<usize> = (0..4096).map(|i| [0, 0, 1, 2][i % 4]).collect();
+        let palette = vec![
+            wrapped("minecraft:air"),
+            wrapped("minecraft:oak_log"),
+            state("minecraft:chest", &[("facing", "north"), ("type", "single"), ("waterlogged", "false")]),
+        ];
+        let input = chunk_with_data(palette, pack(&indices, 4));
+        let (out, _) = transform_chunk(&input, &registry(), false).unwrap();
+        // nonEmpty, fluid, tickingBlock, tickingFluid
+        assert_eq!(section_counts(&out.unwrap()), Some(vec![2048, 1024, 1024, 1024]));
+    }
+
+    #[test]
+    fn counts_wide_palettes() {
+        // 20 entries need 5 bits per index.
+        let names = ["minecraft:air", "minecraft:stone"];
+        let palette: Vec<Tag<'static>> = (0..20).map(|i| wrapped(names[i % 2])).collect();
+        let indices: Vec<usize> = (0..4096).map(|i| i % 20).collect();
+        let (out, _) = transform_chunk(&chunk_with_data(palette, pack(&indices, 5)), &registry(), false).unwrap();
+        let stone = indices.iter().filter(|&&i| i % 2 == 1).count() as i32;
+        assert_eq!(section_counts(&out.unwrap()), Some(vec![stone, 0, 0, 0]));
+    }
+
+    #[test]
+    fn single_entry_palette_counts_whole_section() {
+        let input = chunk(100, mixed(vec![wrapped("minecraft:stone")]));
+        let (out, _) = transform_chunk(&input, &registry(), false).unwrap();
+        assert_eq!(section_counts(&out.unwrap()), Some(vec![4096, 0, 0, 0]));
+    }
+
+    #[test]
+    fn no_counts_for_malformed_data() {
+        let palette = || vec![wrapped("minecraft:air"), wrapped("minecraft:stone")];
+        let short: &'static [u8] = &[0; 8 * 10];
+        let (out, _) = transform_chunk(&chunk_with_data(palette(), short), &registry(), false).unwrap();
+        assert_eq!(section_counts(&out.unwrap()), None);
+        let beyond_palette = pack(&[5usize; 4096], 4);
+        let (out, _) = transform_chunk(&chunk_with_data(palette(), beyond_palette), &registry(), false).unwrap();
+        assert_eq!(section_counts(&out.unwrap()), None);
     }
 }

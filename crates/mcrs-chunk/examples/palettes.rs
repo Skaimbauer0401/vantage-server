@@ -19,6 +19,7 @@ fn main() {
         data_version: read("data_version.txt").trim().parse().unwrap(),
         block_states: PaletteRegistry::parse_table(&read("block_states.tsv")),
         biomes: PaletteRegistry::parse_table(&read("biomes.tsv")),
+        state_flags: std::fs::read(registry_dir.join("state_flags.bin")).unwrap_or_default(),
     };
     let mut unresolved: HashMap<String, usize> = HashMap::new();
     let (mut resolved, mut skipped) = (0, 0);

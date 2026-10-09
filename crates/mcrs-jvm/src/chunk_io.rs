@@ -39,15 +39,19 @@ unsafe fn bytes<'a>(ptr: *const u8, len: usize) -> &'a [u8] {
     }
 }
 
-/// `void set_registry(int dataVersion, u8* blocks, size_t, u8* biomes, size_t)`.
-/// Tables are `<id>\t<key>\n` lines, see [`PaletteRegistry`].
+/// `void set_registry(int dataVersion, u8* blocks, size_t, u8* biomes, size_t, u8* flags, size_t)`.
+/// Tables are `<id>\t<key>\n` lines; `flags` holds one `FLAG_*` byte per block
+/// state id. See [`PaletteRegistry`].
 pub extern "C" fn set_registry(
     data_version: i32,
     blocks: *const u8,
     blocks_len: usize,
     biomes: *const u8,
     biomes_len: usize,
+    flags: *const u8,
+    flags_len: usize,
 ) {
+    let state_flags = unsafe { bytes(flags, flags_len) }.to_vec();
     let blocks = String::from_utf8_lossy(unsafe { bytes(blocks, blocks_len) });
     let biomes = String::from_utf8_lossy(unsafe { bytes(biomes, biomes_len) });
     // For offline tools (e.g. `mcrs-chunk` examples) that need the server's ids.
@@ -56,11 +60,13 @@ pub extern "C" fn set_registry(
         let _ = std::fs::write(dir.join("block_states.tsv"), blocks.as_bytes());
         let _ = std::fs::write(dir.join("biomes.tsv"), biomes.as_bytes());
         let _ = std::fs::write(dir.join("data_version.txt"), data_version.to_string());
+        let _ = std::fs::write(dir.join("state_flags.bin"), &state_flags);
     }
     let registry = PaletteRegistry {
         data_version,
         block_states: PaletteRegistry::parse_table(&blocks),
         biomes: PaletteRegistry::parse_table(&biomes),
+        state_flags,
     };
     tracing::info!(
         target: "mcrs::chunk_io",

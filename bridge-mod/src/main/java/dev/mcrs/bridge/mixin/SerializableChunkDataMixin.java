@@ -60,6 +60,7 @@ public abstract class SerializableChunkDataMixin {
 			PalettedContainer<BlockState> vanilla = codec.parse(NbtOps.INSTANCE, mcrs$withoutIds(tag)).getOrThrow();
 			ChunkIo.verify(vanilla, fast, 4096, "block_states", pos, sectionY);
 		}
+		ChunkIo.offerCounts(fast, tag);
 		cir.setReturnValue(fast);
 	}
 

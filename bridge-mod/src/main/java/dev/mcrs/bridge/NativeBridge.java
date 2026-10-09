@@ -14,7 +14,7 @@ import java.nio.charset.StandardCharsets;
  * is bound as a Panama FFM downcall. Keep the layout in sync with the Rust struct.
  */
 public final class NativeBridge {
-	public static final int ABI_VERSION = 2;
+	public static final int ABI_VERSION = 3;
 
 	private static final String MAGIC = "MCRSBRDG";
 	private static final long HEADER_SIZE = 16;
@@ -55,7 +55,8 @@ public final class NativeBridge {
 		onTick = linker.downcallHandle(fn(table, 1),
 				FunctionDescriptor.ofVoid(ValueLayout.JAVA_LONG), Linker.Option.critical(false));
 		setRegistry = linker.downcallHandle(fn(table, 2), FunctionDescriptor.ofVoid(ValueLayout.JAVA_INT,
-				ValueLayout.ADDRESS, ValueLayout.JAVA_LONG, ValueLayout.ADDRESS, ValueLayout.JAVA_LONG));
+				ValueLayout.ADDRESS, ValueLayout.JAVA_LONG, ValueLayout.ADDRESS, ValueLayout.JAVA_LONG,
+				ValueLayout.ADDRESS, ValueLayout.JAVA_LONG));
 		readChunk = linker.downcallHandle(fn(table, 3), FunctionDescriptor.of(ValueLayout.JAVA_INT,
 				ValueLayout.ADDRESS, ValueLayout.JAVA_LONG, ValueLayout.JAVA_INT, ValueLayout.JAVA_INT, ValueLayout.JAVA_INT,
 				ValueLayout.ADDRESS, ValueLayout.ADDRESS));
@@ -91,14 +92,17 @@ public final class NativeBridge {
 		}
 	}
 
-	/** Tables are {@code <id>	<key>
-} lines; see crates/mcrs-chunk/src/palette.rs. */
-	public static void setRegistry(int dataVersion, String blockStates, String biomes) {
+	/**
+	 * Tables are {@code <id>\t<key>\n} lines; {@code stateFlags} has one byte per block
+	 * state id. See crates/mcrs-chunk/src/palette.rs.
+	 */
+	public static void setRegistry(int dataVersion, String blockStates, String biomes, byte[] stateFlags) {
 		byte[] blocks = blockStates.getBytes(StandardCharsets.UTF_8);
 		byte[] biomeBytes = biomes.getBytes(StandardCharsets.UTF_8);
 		try (Arena arena = Arena.ofConfined()) {
 			setRegistry.invokeExact(dataVersion, arena.allocateFrom(ValueLayout.JAVA_BYTE, blocks), (long) blocks.length,
-					arena.allocateFrom(ValueLayout.JAVA_BYTE, biomeBytes), (long) biomeBytes.length);
+					arena.allocateFrom(ValueLayout.JAVA_BYTE, biomeBytes), (long) biomeBytes.length,
+					arena.allocateFrom(ValueLayout.JAVA_BYTE, stateFlags), (long) stateFlags.length);
 		} catch (Throwable t) {
 			throw new RuntimeException(t);
 		}

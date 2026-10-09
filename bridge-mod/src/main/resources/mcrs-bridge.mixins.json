@@ -5,6 +5,7 @@
 	"server": [
 		"CommandsMixin",
 		"IOWorkerMixin",
+		"LevelChunkSectionMixin",
 		"MinecraftServerMixin",
 		"PalettedContainerFactoryMixin",
 		"SerializableChunkDataMixin"

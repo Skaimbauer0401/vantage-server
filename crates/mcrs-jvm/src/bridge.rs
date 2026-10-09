@@ -9,7 +9,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 pub const MAGIC: u64 = u64::from_le_bytes(*b"MCRSBRDG");
-pub const ABI_VERSION: u32 = 2;
+pub const ABI_VERSION: u32 = 3;
 
 #[repr(C)]
 pub struct BridgeTable {
@@ -21,7 +21,7 @@ pub struct BridgeTable {
     /// `void on_tick(long nanos)`: duration of one `MinecraftServer.tickServer` call
     pub on_tick: extern "C" fn(i64),
     /// See [`crate::chunk_io::set_registry`].
-    pub set_registry: extern "C" fn(i32, *const u8, usize, *const u8, usize),
+    pub set_registry: extern "C" fn(i32, *const u8, usize, *const u8, usize, *const u8, usize),
     /// See [`crate::chunk_io::read_chunk`].
     pub read_chunk: extern "C" fn(*const u8, usize, i32, i32, i32, *mut *mut u8, *mut usize) -> i32,
     /// See [`crate::chunk_io::free_buffer`].
