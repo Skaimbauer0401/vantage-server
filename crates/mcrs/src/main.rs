@@ -56,6 +56,47 @@ fn main() -> Result<()> {
     jvm_thread.join().expect("JVM thread panicked")
 }
 
+/// JVM options for the AOT cache: load it if it matches this setup, else record a new one
+/// (the JVM writes it when the server exits).
+fn aot_options(config: &Config, java_home: &Path, options: &[String]) -> Result<Vec<String>> {
+    use std::hash::{Hash, Hasher};
+
+    let dir = std::env::current_dir()?.join(".mcrs");
+    std::fs::create_dir_all(&dir)?;
+    let cache = dir.join("server.aot");
+    let stamp = dir.join("server.aot.fingerprint");
+
+    // Everything the cache depends on: a stale cache is ignored by the JVM, so rebuild it.
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    java_home.hash(&mut h);
+    (&config.minecraft_version, &config.fabric_loader_version, &config.fabric_installer_version).hash(&mut h);
+    for o in options.iter().filter(|o| !o.starts_with("-Dmcrs.bridge=")) {
+        o.hash(&mut h);
+    }
+    let mut files = vec![std::path::PathBuf::from(setup::FABRIC_LAUNCHER_JAR)];
+    if let Ok(entries) = std::fs::read_dir("mods") {
+        files.extend(entries.flatten().map(|e| e.path()));
+    }
+    files.sort();
+    for f in &files {
+        if let Ok(meta) = std::fs::metadata(f) {
+            f.hash(&mut h);
+            meta.len().hash(&mut h);
+            meta.modified().ok().hash(&mut h);
+        }
+    }
+    let fingerprint = format!("{:016x}", h.finish());
+
+    let path = cache.to_string_lossy().into_owned();
+    if cache.exists() && std::fs::read_to_string(&stamp).ok().as_deref() == Some(fingerprint.as_str()) {
+        return Ok(vec![format!("-XX:AOTCache={path}")]);
+    }
+    let _ = std::fs::remove_file(&cache);
+    std::fs::write(&stamp, &fingerprint)?;
+    tracing::info!("recording a JVM AOT cache this run; later starts will be faster");
+    Ok(vec![format!("-XX:AOTCacheOutput={path}")])
+}
+
 fn run_server(config: &Config, java_home: &Path) -> Result<()> {
     let mut options = vec![
         format!("-Djava.class.path={}", setup::FABRIC_LAUNCHER_JAR),
@@ -72,6 +113,13 @@ fn run_server(config: &Config, java_home: &Path) -> Result<()> {
     // One-off extras (profiling etc.) without editing mcrs.toml.
     if let Ok(extra) = std::env::var("MCRS_JVM_OPTIONS") {
         options.extend(extra.split_whitespace().map(String::from));
+    }
+    // MCRS_AOT_CACHE=0: off for this run (benchmarks that vary JVM options).
+    if config.aot_cache && std::env::var("MCRS_AOT_CACHE").as_deref() != Ok("0") {
+        match aot_options(config, java_home, &options) {
+            Ok(aot) => options.extend(aot),
+            Err(e) => tracing::warn!("AOT cache disabled: {e:#}"),
+        }
     }
 
     let jvm = Jvm::create(java_home, &options).context("starting JVM")?;

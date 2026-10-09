@@ -27,6 +27,10 @@ pub struct Config {
     /// CPU-specific intrinsics. Required for Rust worldgen to match Java bit for bit;
     /// also makes results identical across x86 and ARM.
     pub deterministic_math: bool,
+    /// Keep a JVM AOT cache (JDK 25+) in `<run_dir>/.mcrs/`: the first start records it,
+    /// later starts load and link those classes from it. Rebuilt whenever the JVM, its
+    /// options, the versions or the mods change.
+    pub aot_cache: bool,
 }
 
 impl Default for Config {
@@ -42,6 +46,7 @@ impl Default for Config {
             server_args: vec!["nogui".into()],
             tick_report_interval_secs: 30,
             deterministic_math: true,
+            aot_cache: true,
         }
     }
 }

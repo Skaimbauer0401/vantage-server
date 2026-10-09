@@ -83,12 +83,32 @@ public final class ChunkIo {
 	}
 
 	/** Sends the global block state and biome ids of {@code factory} to Rust. */
+	private static IdMap<BlockState> exportedBlockIds;
+	private static int exportedBlockCount;
+	private static String exportedBiomes;
+
 	public static void exportRegistry(PalettedContainerFactory factory) {
 		if (!active()) {
 			return;
 		}
-		StringBuilder blocks = new StringBuilder(1 << 20);
 		IdMap<BlockState> blockIds = factory.blockStatesStrategy().globalMap();
+		IdMap<Holder<Biome>> biomeIds = factory.biomeStrategy().globalMap();
+		StringBuilder biomeList = new StringBuilder(1 << 12);
+		for (Holder<Biome> biome : biomeIds) {
+			biome.unwrapKey().ifPresent(key ->
+					biomeList.append(biomeIds.getId(biome)).append('\t').append(key.identifier()).append('\n'));
+		}
+		String biomes = biomeList.toString();
+		// Every dimension creates a factory over the same registries; export them once.
+		synchronized (ChunkIo.class) {
+			if (blockIds == exportedBlockIds && blockIds.size() == exportedBlockCount && biomes.equals(exportedBiomes)) {
+				return;
+			}
+			exportedBlockIds = blockIds;
+			exportedBlockCount = blockIds.size();
+			exportedBiomes = biomes;
+		}
+		StringBuilder blocks = new StringBuilder(1 << 20);
 		byte[] flags = new byte[blockIds.size()];
 		for (BlockState state : blockIds) {
 			flags[blockIds.getId(state)] = stateFlags(state);
@@ -99,14 +119,8 @@ public final class ChunkIo {
 						.append(BuiltInRegistries.BLOCK.getKey(state.getBlock())).append('\n');
 			}
 		}
-		StringBuilder biomes = new StringBuilder(1 << 12);
-		IdMap<Holder<Biome>> biomeIds = factory.biomeStrategy().globalMap();
-		for (Holder<Biome> biome : biomeIds) {
-			biome.unwrapKey().ifPresent(key ->
-					biomes.append(biomeIds.getId(biome)).append('\t').append(key.identifier()).append('\n'));
-		}
 		NativeBridge.setRegistry(SharedConstants.getCurrentVersion().dataVersion().version(),
-				blocks.toString(), biomes.toString(), flags);
+				blocks.toString(), biomes, flags);
 	}
 
 	/** Per-state counter flags, mirroring {@code LevelChunkSection$1BlockCounter.accept}. */

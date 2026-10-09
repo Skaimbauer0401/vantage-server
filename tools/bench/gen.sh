@@ -17,7 +17,7 @@ PROPS
 LOG="$DIR/bench-${2:-run}.log"
 ( sleep 20
   for c in "0 2000" "2000 0" "-2000 -2000" "3000 3000"; do echo "mcrs bench chunks 16 $c"; sleep 20; done
-  echo stop; sleep 30 ) | MCRS_RUN_DIR="$DIR" MCRS_JVM_OPTIONS="$1" ./target/release/mcrs > "$LOG" 2>&1
+  echo stop; sleep 30 ) | MCRS_RUN_DIR="$DIR" MCRS_AOT_CACHE="${MCRS_AOT_CACHE:-0}" MCRS_JVM_OPTIONS="$1" ./target/release/mcrs > "$LOG" 2>&1
 # Keep the world for comparisons (crates/mcrs-chunk/examples/compare_worlds.rs).
 mkdir -p target/bench-worlds
 rm -rf "target/bench-worlds/${2:-run}"
