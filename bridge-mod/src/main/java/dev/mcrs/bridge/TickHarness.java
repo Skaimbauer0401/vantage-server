@@ -316,6 +316,24 @@ public final class TickHarness {
 					command(server, s, String.format(Locale.ROOT, "summon minecraft:item %d %d %d {Item:{id:\"minecraft:wheat\",count:1}}", x, y + 1, z));
 				}
 			}
+			case "farm" -> {
+				// Random tick targets: wheat on farmland, dirt next to grass, saplings; random
+				// ticks sped up by "size" times.
+				command(server, s, "gamerule random_tick_speed " + 3 * size);
+				command(server, s, "gamerule randomTickSpeed " + 3 * size);
+				command(server, s, String.format(Locale.ROOT, "fill -48 %d -48 48 %d -17 minecraft:farmland", y - 1, y - 1));
+				command(server, s, String.format(Locale.ROOT, "fill -48 %d -48 48 %d -17 minecraft:wheat", y, y));
+				command(server, s, String.format(Locale.ROOT, "fill -48 %d -16 48 %d 15 minecraft:dirt", y - 1, y - 1));
+				for (int x = -48; x <= 48; x += 6) {
+					command(server, s, String.format(Locale.ROOT, "fill %d %d -16 %d %d 15 minecraft:grass_block", x, y - 1, x, y - 1));
+				}
+				command(server, s, String.format(Locale.ROOT, "fill -48 %d 16 48 %d 47 minecraft:dirt", y - 1, y - 1));
+				for (int x = -48; x <= 48; x += 4) {
+					for (int z = 16; z <= 47; z += 4) {
+						command(server, s, String.format(Locale.ROOT, "setblock %d %d %d minecraft:oak_sapling", x, y, z));
+					}
+				}
+			}
 			case "redstone" -> {
 				// Units of: observer clock -> 12 dust -> sticky piston pushing a block, in a
 				// grid of 8 rows (up to 320 units inside the loaded area).

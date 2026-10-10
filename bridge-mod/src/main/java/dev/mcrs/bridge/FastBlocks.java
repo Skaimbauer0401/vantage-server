@@ -14,6 +14,9 @@ package dev.mcrs.bridge;
  * <p>A server level's {@code BiomeManager.getBiome} is cached the same way (cleared on chunk
  * loads, unloads, status changes and biome refills).
  *
+ * <p>Random ticks test a per-section bit set of randomly ticking blocks before reading the
+ * picked block.
+ *
  * <p>Collision iteration ({@code BlockCollisions}) reads blocks of plain level chunks straight
  * from their sections.
  */
@@ -26,6 +29,11 @@ public final class FastBlocks {
 	/** Biome cache verify counters (-Dmcrs.biomeCache.verify=true). */
 	public static final java.util.concurrent.atomic.AtomicLong BIOME_VERIFIED = new java.util.concurrent.atomic.AtomicLong();
 	public static final java.util.concurrent.atomic.AtomicLong BIOME_MISMATCHED = new java.util.concurrent.atomic.AtomicLong();
+
+	/** Implemented by the chunk section mixin: one bit per block that ticks randomly. */
+	public interface TickingBits {
+		long[] mcrs$tickingBits();
+	}
 
 	/** Implemented by the biome manager mixin. */
 	public interface BiomeCache {
