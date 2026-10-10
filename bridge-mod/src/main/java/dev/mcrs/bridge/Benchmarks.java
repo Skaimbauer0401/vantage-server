@@ -204,6 +204,10 @@ public final class Benchmarks {
 				report(source, String.format(Locale.ROOT, "[bench] fast light verify: %d checks %s, %d differ",
 						FastLight.CHECKED.get(), FastLight.BY_KIND, FastLight.MISMATCHED.get()));
 			}
+			if (FastOres.VERIFY) {
+				report(source, String.format(Locale.ROOT, "[bench] fast ores verify: %d placements identical, %d differ",
+						FastOres.VERIFIED.get(), FastOres.MISMATCHED.get()));
+			}
 			if (ChunkIo.VERIFY) {
 				report(source, String.format(Locale.ROOT, "[bench] chunk io verify: %d containers compared, %d mismatches",
 						ChunkIo.VERIFIED.get(), ChunkIo.MISMATCHES.get()));

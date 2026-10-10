@@ -31,10 +31,12 @@
 		"NoiseBasedChunkGeneratorMixin",
 		"NoiseChunkAccessor",
 		"NoiseGeneratorTimingMixin",
+		"OreFeatureMixin",
 		"OreTimingMixin",
 		"PalettedContainerAccessor",
 		"PalettedContainerFactoryMixin",
 		"RandomSupportMixin",
+		"SectionWriteLogMixin",
 		"SensorSortMixin",
 		"SerializableChunkDataMixin",
 		"ServerLevelEntityAccessor",
@@ -43,6 +45,7 @@
 		"SkyLightSectionStorageInvoker",
 		"SkyLightSourcesMixin",
 		"StructureTemplatePaletteMixin",
+		"WorldGenRegionAccessor",
 		"ThreadedLevelLightEngineMixin"
 	],
 	"injectors": {
