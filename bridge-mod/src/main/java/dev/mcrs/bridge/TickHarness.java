@@ -303,6 +303,13 @@ public final class TickHarness {
 					int z = random.nextInt(2 * half - 4) - half + 2;
 					command(server, s, String.format(Locale.ROOT, "summon minecraft:%s %d %d %d {PersistenceRequired:1b}", types[i % types.length], x, y, z));
 				}
+				// Entities others collide with (and that collide with others).
+				String[] solid = {"oak_boat", "minecart", "shulker"};
+				for (int i = 0; i < size / 30; i++) {
+					int x = random.nextInt(2 * half - 4) - half + 2;
+					int z = random.nextInt(2 * half - 4) - half + 2;
+					command(server, s, String.format(Locale.ROOT, "summon minecraft:%s %d %d %d", solid[i % solid.length], x, y, z));
+				}
 				for (int i = 0; i < size / 10; i++) {
 					int x = random.nextInt(2 * half - 4) - half + 2;
 					int z = random.nextInt(2 * half - 4) - half + 2;
