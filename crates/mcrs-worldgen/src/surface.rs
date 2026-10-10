@@ -462,30 +462,37 @@ fn corner_fiddles(seed: i64, cx: i32, cy: i32, cz: i32) -> [f64; 3] {
     [fiddle_x, fiddle_y, fiddle_z]
 }
 
-/// `BiomeManager.getBiome` for one block column, caching each corner's fiddles
-/// (the distance arithmetic per lookup is unchanged).
+/// `BiomeManager.getBiome` for the blocks of one chunk. Per parent quart cell it caches the
+/// corner fiddles, the 8 candidate noise biomes and whether they all agree; the 16 columns
+/// over a cell share them. The distance arithmetic per lookup is unchanged.
 struct ColumnZoom {
     x: i32,
     z: i32,
-    /// Corner fiddles per (corner y - base_y) and the 4 xz corners.
-    cache: Vec<Option<[[f64; 3]; 4]>>,
-    /// Per parent quart Y: Some(id) if all 8 corner noise biomes are `id`, None if mixed.
-    uniform: Vec<Option<Option<u32>>>,
-    /// Per parent quart Y: the 8 corner noise biomes the zoom picks from.
-    candidates: Vec<Option<[u32; 8]>>,
+    px0: i32,
+    pz0: i32,
     base_y: i32,
+    ny: usize,
+    /// Corner fiddles per cell (px, corner y, pz): the 4 xz corners.
+    cache: Vec<Option<[[f64; 3]; 4]>>,
+    /// Per cell: Some(id) if all 8 corner noise biomes are `id`, None if mixed.
+    uniform: Vec<Option<Option<u32>>>,
+    /// Per cell: the 8 corner noise biomes the zoom picks from, as a bit set over biome ids
+    /// (None inside: an id too large for the set).
+    candidates: Vec<Option<Option<[u64; 4]>>>,
 }
 
 impl ColumnZoom {
     fn new() -> ColumnZoom {
-        ColumnZoom { x: i32::MIN, z: i32::MIN, cache: Vec::new(), uniform: Vec::new(), candidates: Vec::new(), base_y: 0 }
+        ColumnZoom { x: i32::MIN, z: i32::MIN, px0: 0, pz0: 0, base_y: 0, ny: 0, cache: Vec::new(), uniform: Vec::new(), candidates: Vec::new() }
     }
 
-    fn reset(&mut self, x: i32, z: i32, min_y: i32, max_y: i32) {
-        self.x = x;
-        self.z = z;
+    /// Sets up the cells for the chunk with these block bounds.
+    fn init_chunk(&mut self, min_bx: i32, min_bz: i32, min_y: i32, max_y: i32) {
+        self.px0 = (min_bx - 2) >> 2;
+        self.pz0 = (min_bz - 2) >> 2;
         self.base_y = ((min_y - 2) >> 2) - 1;
-        let len = (((max_y - 2) >> 2) + 2 - self.base_y + 1).max(1) as usize;
+        self.ny = (((max_y - 2) >> 2) + 2 - self.base_y + 1).max(1) as usize;
+        let len = 25 * self.ny;
         self.cache.clear();
         self.cache.resize(len, None);
         self.uniform.clear();
@@ -494,27 +501,53 @@ impl ColumnZoom {
         self.candidates.resize(len, None);
     }
 
-    /// Whether `test` holds for the zoomed biome at (x, y, z), when that's decided without
-    /// zooming: the zoom always picks one of the 8 surrounding noise biomes, so if `test`
-    /// is the same for all of them, that is the answer. None if they disagree.
-    fn same_for_candidates(&mut self, area: &BiomeArea, x: i32, y: i32, z: i32, test: impl Fn(u32) -> bool) -> Option<bool> {
+    fn slot(&self, px: i32, py: i32, pz: i32) -> Option<usize> {
+        let (i, j, k) = (px - self.px0, pz - self.pz0, py - self.base_y);
+        if (0..5).contains(&i) && (0..5).contains(&j) && k >= 0 && (k as usize) < self.ny {
+            Some((i * 5 + j) as usize * self.ny + k as usize)
+        } else {
+            None
+        }
+    }
+
+    fn reset(&mut self, x: i32, z: i32) {
+        self.x = x;
+        self.z = z;
+    }
+
+    /// Whether the zoomed biome at (x, y, z) is in the set `bits`, when that's decided
+    /// without zooming: the zoom always picks one of the 8 surrounding noise biomes, so if
+    /// all or none of them are in the set, that is the answer. None otherwise.
+    fn in_set_for_candidates(&mut self, area: &BiomeArea, x: i32, y: i32, z: i32, bits: &[u64]) -> Option<bool> {
         if x != self.x || z != self.z {
             return None;
         }
         let (px, py, pz) = ((x - 2) >> 2, (y - 2) >> 2, (z - 2) >> 2);
-        let slot = (py - self.base_y) as usize;
-        if slot >= self.candidates.len() {
-            return None;
-        }
-        let ids = *self.candidates[slot].get_or_insert_with(|| {
-            let mut ids = [0u32; 8];
-            for (i, id) in ids.iter_mut().enumerate() {
-                *id = area.noise_biome(px + (i >> 2 & 1) as i32, py + (i >> 1 & 1) as i32, pz + (i & 1) as i32);
+        let slot = self.slot(px, py, pz)?;
+        let mask = (*self.candidates[slot].get_or_insert_with(|| {
+            let mut mask = [0u64; 4];
+            for i in 0..8 {
+                let id = area.noise_biome(px + (i >> 2 & 1), py + (i >> 1 & 1), pz + (i & 1)) as usize;
+                if id >= 256 {
+                    return None;
+                }
+                mask[id / 64] |= 1 << (id % 64);
             }
-            ids
-        });
-        let first = test(ids[0]);
-        ids[1..].iter().all(|&id| test(id) == first).then_some(first)
+            Some(mask)
+        }))?;
+        let (mut any, mut all) = (false, true);
+        for (w, m) in mask.iter().enumerate() {
+            let b = bits.get(w).copied().unwrap_or(0);
+            any |= m & b != 0;
+            all &= m & !b == 0;
+        }
+        if all {
+            Some(true)
+        } else if !any {
+            Some(false)
+        } else {
+            None
+        }
     }
 
     fn biome(&mut self, seed: i64, area: &BiomeArea, x: i32, y: i32, z: i32) -> u32 {
@@ -524,8 +557,7 @@ impl ColumnZoom {
         let (ax, ay, az) = (x - 2, y - 2, z - 2);
         let (px, py, pz) = (ax >> 2, ay >> 2, az >> 2);
         // The zoom always picks one of these 8 noise biomes; if they agree, that's it.
-        let slot = (py - self.base_y) as usize;
-        if slot < self.uniform.len() {
+        if let Some(slot) = self.slot(px, py, pz) {
             let uniform = *self.uniform[slot].get_or_insert_with(|| {
                 let first = area.noise_biome(px, py, pz);
                 [(1, 0, 0), (0, 1, 0), (0, 0, 1), (1, 1, 0), (1, 0, 1), (0, 1, 1), (1, 1, 1)]
@@ -543,10 +575,9 @@ impl ColumnZoom {
         for i in 0..8 {
             let (x_even, y_even, z_even) = (i & 4 == 0, i & 2 == 0, i & 1 == 0);
             let cy = if y_even { py } else { py + 1 };
-            let slot = (cy - self.base_y) as usize;
-            if slot >= self.cache.len() {
+            let Some(slot) = self.slot(px, cy, pz) else {
                 return zoomed_biome(seed, area, x, y, z);
-            }
+            };
             let corners = *self.cache[slot].get_or_insert_with(|| {
                 [
                     corner_fiddles(seed, px, cy, pz),
@@ -641,15 +672,41 @@ struct Run<'a, 'g> {
     update_xz: u64,
     update_y: u64,
     zoom: ColumnZoom,
+    veins: Vec<Vein>,
 }
 
-/// A rule after `compile`: ore veins hold their prefilled density buffers.
+/// A rule after `compile`; ore veins refer to their prefilled density buffers in `Run::veins`.
+#[derive(Clone)]
 enum Compiled {
     Sequence(Vec<Compiled>),
     Condition(Cond, Box<Compiled>),
     Block(u32),
     Bandlands,
-    OreVein { ore: u32, raw_ore: u32, filler: u32, raw_ore_chance: f32, density: Vec<f32>, density_node: NodeId, richness: Vec<f32>, richness_node: NodeId, filler_gap: NodeId, random: AnyPositional },
+    OreVein(usize),
+}
+
+struct Vein {
+    ore: u32,
+    raw_ore: u32,
+    filler: u32,
+    raw_ore_chance: f32,
+    density: Vec<f32>,
+    density_node: NodeId,
+    richness: Vec<f32>,
+    richness_node: NodeId,
+    filler_gap: NodeId,
+    random: AnyPositional,
+}
+
+/// Pruned copies of the compiled rule for blocks whose vertical gradients (by Y band) and
+/// `above_preliminary_surface` answer are already known. A condition is only dropped when
+/// evaluating it has no side effect: gradients outside their random range, and the
+/// preliminary surface once the column has computed it.
+struct Variants {
+    /// Sorted Y values where some vertical gradient changes state.
+    breaks: Vec<i32>,
+    /// Per (band, preliminary state), built on first use; inner None: never places a block.
+    cache: Vec<Option<Option<Compiled>>>,
 }
 
 impl Run<'_, '_> {
@@ -669,7 +726,7 @@ impl Run<'_, '_> {
                 let v = self.expected_volume;
                 let density_buffer = self.ctx.sample_volume_new(*density, &v);
                 let richness_buffer = self.ctx.sample_volume_new(*richness, &v);
-                Compiled::OreVein {
+                self.veins.push(Vein {
                     ore: *ore,
                     raw_ore: *raw_ore,
                     filler: *filler,
@@ -680,9 +737,129 @@ impl Run<'_, '_> {
                     richness_node: *richness,
                     filler_gap: *filler_gap,
                     random: *random,
-                }
+                });
+                Compiled::OreVein(self.veins.len() - 1)
             }
         }
+    }
+
+    /// The answer of `c` for every block with Y in `[lo, hi]`, when known without evaluating
+    /// it: vertical gradients outside their random range, and the preliminary surface test
+    /// once the column has computed it (`prelim`).
+    fn known(&self, c: &Cond, lo: i32, hi: i32, prelim: Option<bool>) -> Option<bool> {
+        match c {
+            Cond::VerticalGradient { true_at, false_at, .. } => {
+                let (t, f) = (true_at.resolve(&self.gen), false_at.resolve(&self.gen));
+                if hi <= t {
+                    Some(true)
+                } else if lo >= f {
+                    Some(false)
+                } else {
+                    None
+                }
+            }
+            Cond::AbovePreliminarySurface => prelim,
+            Cond::Not(inner) => self.known(inner, lo, hi, prelim).map(|v| !v),
+            _ => None,
+        }
+    }
+
+    fn has_side_effects(c: &Cond) -> bool {
+        match c {
+            Cond::AbovePreliminarySurface => true,
+            Cond::Not(inner) => Self::has_side_effects(inner),
+            _ => false,
+        }
+    }
+
+    /// `rule` for blocks with Y in `[lo, hi]` given `prelim`; None if it never places a
+    /// block. Kept conditions are evaluated as before, in the same order.
+    fn prune(&self, rule: &Compiled, lo: i32, hi: i32, prelim: Option<bool>) -> Option<Compiled> {
+        fn always(rule: &Compiled) -> bool {
+            match rule {
+                Compiled::Block(_) | Compiled::Bandlands => true,
+                Compiled::Sequence(rules) => rules.iter().any(always),
+                Compiled::Condition(..) | Compiled::OreVein(_) => false,
+            }
+        }
+        match rule {
+            Compiled::Sequence(rules) => {
+                let mut out = Vec::new();
+                for r in rules {
+                    if let Some(p) = self.prune(r, lo, hi, prelim) {
+                        let stop = always(&p);
+                        match p {
+                            Compiled::Sequence(inner) => out.extend(inner),
+                            p => out.push(p),
+                        }
+                        if stop {
+                            break;
+                        }
+                    }
+                }
+                match out.len() {
+                    0 => None,
+                    1 => out.pop(),
+                    _ => Some(Compiled::Sequence(out)),
+                }
+            }
+            Compiled::Condition(c, then) => match self.known(c, lo, hi, prelim) {
+                Some(false) => None,
+                Some(true) => self.prune(then, lo, hi, prelim),
+                None => match self.prune(then, lo, hi, prelim) {
+                    Some(t) => Some(Compiled::Condition(c.clone(), Box::new(t))),
+                    // The test itself has an effect (computing the preliminary surface): keep it.
+                    None if Self::has_side_effects(c) => Some(Compiled::Condition(c.clone(), Box::new(Compiled::Sequence(Vec::new())))),
+                    None => None,
+                },
+            },
+            other => Some(other.clone()),
+        }
+    }
+
+    fn variants(&self, rule: &Compiled) -> Variants {
+        fn collect(rule: &Compiled, out: &mut Vec<(Anchor, Anchor)>) {
+            match rule {
+                Compiled::Sequence(rules) => rules.iter().for_each(|r| collect(r, out)),
+                Compiled::Condition(c, then) => {
+                    collect_cond(c, out);
+                    collect(then, out);
+                }
+                _ => {}
+            }
+        }
+        fn collect_cond(c: &Cond, out: &mut Vec<(Anchor, Anchor)>) {
+            match c {
+                Cond::VerticalGradient { true_at, false_at, .. } => out.push((*true_at, *false_at)),
+                Cond::Not(inner) => collect_cond(inner, out),
+                _ => {}
+            }
+        }
+        let mut gradients = Vec::new();
+        collect(rule, &mut gradients);
+        let mut breaks = Vec::new();
+        for (true_at, false_at) in gradients {
+            breaks.push(true_at.resolve(&self.gen).saturating_add(1));
+            breaks.push(false_at.resolve(&self.gen));
+        }
+        breaks.sort_unstable();
+        breaks.dedup();
+        let slots = (breaks.len() + 1) * 3;
+        Variants { breaks, cache: (0..slots).map(|_| None).collect() }
+    }
+
+    /// The pruned rule for a block at `y` with preliminary state `prelim`.
+    fn variant<'v>(&self, rule: &Compiled, variants: &'v mut Variants, y: i32, prelim: Option<bool>) -> Option<&'v Compiled> {
+        let band = variants.breaks.partition_point(|&b| b <= y);
+        let lo = if band == 0 { i32::MIN } else { variants.breaks[band - 1] };
+        let hi = if band == variants.breaks.len() { i32::MAX } else { variants.breaks[band] - 1 };
+        let slot = band * 3
+            + match prelim {
+                None => 0,
+                Some(false) => 1,
+                Some(true) => 2,
+            };
+        variants.cache[slot].get_or_insert_with(|| self.prune(rule, lo, hi, prelim)).as_ref()
     }
 
     fn update_xz(&mut self, x: i32, z: i32, gradient_x: i32, gradient_z: i32) {
@@ -777,7 +954,7 @@ impl Run<'_, '_> {
             Cond::Biome(bits) => {
                 let contains = |b: u32| bits.get(b as usize / 64).is_some_and(|w| w & (1 << (b % 64)) != 0);
                 if self.biome.is_none() {
-                    if let Some(known) = self.zoom.same_for_candidates(self.biomes, self.block_x, self.block_y, self.block_z, contains) {
+                    if let Some(known) = self.zoom.in_set_for_candidates(self.biomes, self.block_x, self.block_y, self.block_z, bits) {
                         return known;
                     }
                 }
@@ -856,10 +1033,21 @@ impl Run<'_, '_> {
         self.s.clay_bands[((y + offset + n) % n) as usize]
     }
 
-    fn density_getter(&mut self, buffer: &[f32], node: NodeId) -> f32 {
+    fn density_getter(&mut self, vein: usize, richness: bool) -> f32 {
         match self.expected_volume.index_of_block(self.block_x, self.block_y, self.block_z) {
-            Some(index) => buffer[index],
-            None => self.ctx.sample_value(node, self.block_x, self.block_y, self.block_z),
+            Some(index) => {
+                let v = &self.veins[vein];
+                if richness {
+                    v.richness[index]
+                } else {
+                    v.density[index]
+                }
+            }
+            None => {
+                let v = &self.veins[vein];
+                let node = if richness { v.richness_node } else { v.density_node };
+                self.ctx.sample_value(node, self.block_x, self.block_y, self.block_z)
+            }
         }
     }
 
@@ -882,22 +1070,23 @@ impl Run<'_, '_> {
             }
             Compiled::Block(s) => Some(*s),
             Compiled::Bandlands => Some(self.band(self.block_x, self.block_y, self.block_z)),
-            Compiled::OreVein { ore, raw_ore, filler, raw_ore_chance, density, density_node, richness, richness_node, filler_gap, random } => {
-                let d = self.density_getter(density, *density_node);
+            Compiled::OreVein(index) => {
+                let index = *index;
+                let d = self.density_getter(index, false);
                 if d <= 0.0 {
                     return None;
                 }
-                let mut r = random.at(self.block_x, self.block_y, self.block_z);
+                let v = &self.veins[index];
+                let (ore, raw_ore, filler, raw_ore_chance, filler_gap) = (v.ore, v.raw_ore, v.filler, v.raw_ore_chance, v.filler_gap);
+                let mut r = v.random.at(self.block_x, self.block_y, self.block_z);
                 if r.next_float() > d {
                     return None;
                 }
-                let rich = self.density_getter(richness, *richness_node);
-                if r.next_float() < rich
-                    && self.ctx.sample_value(*filler_gap, self.block_x, self.block_y, self.block_z) < 0.0
-                {
-                    Some(if r.next_float() < *raw_ore_chance { *raw_ore } else { *ore })
+                let rich = self.density_getter(index, true);
+                if r.next_float() < rich && self.ctx.sample_value(filler_gap, self.block_x, self.block_y, self.block_z) < 0.0 {
+                    Some(if r.next_float() < raw_ore_chance { raw_ore } else { ore })
                 } else {
-                    Some(*filler)
+                    Some(filler)
                 }
             }
         }
@@ -965,8 +1154,11 @@ impl Surface {
             update_xz: 0,
             update_y: 0,
             zoom: ColumnZoom::new(),
+            veins: Vec::new(),
         };
+        run.zoom.init_chunk(full.min_x, full.min_z, chunk.min_y, chunk.max_y() + 16);
         let rule = run.compile(&self.rule);
+        let mut variants = run.variants(&rule);
         let min_bx = full.min_x;
         let min_bz = full.min_z;
         let height_at = |chunk: &ChunkBlocks, x: i32, z: i32| chunk.world_surface[(x + z * 16) as usize] - 1;
@@ -984,7 +1176,7 @@ impl Surface {
                 let gradient_x = height_at(chunk, (x + 1).min(15), z) - height_at(chunk, (x - 1).max(0), z);
                 let gradient_z = height_at(chunk, x, (z + 1).min(15)) - height_at(chunk, x, (z - 1).max(0));
                 run.update_xz(bx, bz, gradient_x, gradient_z);
-                run.zoom.reset(bx, bz, chunk.min_y, height.max(starting_height));
+                run.zoom.reset(bx, bz);
                 let mut stone_above = 0;
                 let mut water_height = i32::MIN;
                 let mut next_ceiling = i32::MAX;
@@ -1016,8 +1208,11 @@ impl Surface {
                         let stone_below = y - next_ceiling + 1;
                         run.update_y(stone_above, stone_below, water_height, y);
                         if y >= input.gen_min_y && y <= input.gen_max_y {
-                            if let Some(state) = run.apply(&rule) {
-                                set_column_block(chunk, flags, input, x, y, z, bx, bz, state);
+                            let prelim = run.min_surface_level.map(|level| y >= level);
+                            if let Some(pruned) = run.variant(&rule, &mut variants, y, prelim) {
+                                if let Some(state) = run.apply(pruned) {
+                                    set_column_block(chunk, flags, input, x, y, z, bx, bz, state);
+                                }
                             }
                         }
                     }
@@ -1032,16 +1227,9 @@ impl Surface {
         if let Some(b) = run.preliminary_buffer.take() {
             crate::density::recycle([b]);
         }
-        recycle_compiled(rule);
-    }
-}
-
-fn recycle_compiled(rule: Compiled) {
-    match rule {
-        Compiled::Sequence(rules) => rules.into_iter().for_each(recycle_compiled),
-        Compiled::Condition(_, then) => recycle_compiled(*then),
-        Compiled::OreVein { density, richness, .. } => crate::density::recycle([density, richness]),
-        _ => {}
+        for vein in run.veins.drain(..) {
+            crate::density::recycle([vein.density, vein.richness]);
+        }
     }
 }
 
