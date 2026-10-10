@@ -266,6 +266,7 @@ public final class FakePlayers {
 			String summary = String.format(Locale.ROOT, "[bots] %d ticks, mean %.3f ms, median %.3f ms, p95 %.3f ms, %d chunk packets", nanos.length, mean, median, p95,
 					chunks);
 			Benchmarks.report(source, summary);
+			Benchmarks.report(source, String.format(Locale.ROOT, "[bots] mob ticks skipped by the activation range: %d", ActivationRange.SKIPPED.get()));
 			if (Boolean.getBoolean("mcrs.biomeCache.verify")) {
 				Benchmarks.report(source, String.format(Locale.ROOT, "[bots] biome cache verify: %d hits identical, %d differ", FastBlocks.BIOME_VERIFIED.get(),
 						FastBlocks.BIOME_MISMATCHED.get()));
