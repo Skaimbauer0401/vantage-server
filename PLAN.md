@@ -403,6 +403,26 @@ increase propagation and sky source fill with cached lookups. All verified exact
 Back to back now: vanilla 92.1 / 119.2 / 139.0 / 163.5, mcrs 158.4 / 233.8 / 264.4 / 354.7 chunks/s
 (2.2x in the warm area).
 
+**Phase 4: game logic (entities, redstone), exactly vanilla.** `tools/bench/tick.sh` runs
+`/mcrs harness <mobs|redstone> <size> <ticks> <hash>` on a fresh flat world: it fixes the world
+state and hashes every entity's saved data and the sequence of block changes after every tick.
+Reproducible with `-Dmcrs.deterministic=<seed>` (seeded unique seeds) and `-XX:hashCode=3`
+(identity hashes from a sequence, so vanilla's identity-hash-ordered maps iterate the same way):
+three vanilla mob runs and two redstone runs are identical tick for tick. Every optimization must
+keep the hashes identical to vanilla's.
+
+| Scenario | Vanilla | mcrs | Change |
+|---|---|---|---|
+| 1500 mobs + boats/minecarts/shulkers (mean tick) | 35.0 ms | 28.7 ms | -18% |
+| 320 redstone clock units (mean / p95 tick) | 41-44 / 186-209 ms | 22 / 91-94 ms | 1.9x |
+
+- Entity collisions: queries for entities that act like blocks visit only each section's
+  possibly-collidable entities (same list, same order).
+- Block states: exact cache in front of `Level.getBlockState` on the server thread (invalidated on
+  every chunk write, chunk status change and unload).
+- Next: entity pushing / sensor queries (spatial index that keeps vanilla's result order), block
+  collision reads, villager POI lookups.
+
 ## 11. Next Steps
 
 1. Density function framework (`densityfunction/*`, ~4300 lines): parse the vanilla datapack's
