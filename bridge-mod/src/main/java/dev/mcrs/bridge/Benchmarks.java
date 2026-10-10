@@ -118,6 +118,13 @@ public final class Benchmarks {
 														.executes(c -> entities(c.getSource(), IdentifierArgument.getId(c, "type").toString(),
 																IntegerArgumentType.getInteger(c, "count"),
 																IntegerArgumentType.getInteger(c, "seconds"))))))))
+				.then(Commands.literal("bots")
+						.then(Commands.argument("count", IntegerArgumentType.integer(1, 500))
+								.then(Commands.argument("speed", com.mojang.brigadier.arguments.DoubleArgumentType.doubleArg(0.0, 10.0))
+										.then(Commands.argument("ticks", IntegerArgumentType.integer(1, 100000))
+												.executes(c -> FakePlayers.start(c.getSource(), IntegerArgumentType.getInteger(c, "count"),
+														com.mojang.brigadier.arguments.DoubleArgumentType.getDouble(c, "speed"),
+														IntegerArgumentType.getInteger(c, "ticks")))))))
 				.then(Commands.literal("harness")
 						.then(Commands.argument("scenario", com.mojang.brigadier.arguments.StringArgumentType.word())
 								.then(Commands.argument("size", IntegerArgumentType.integer(1, 5000))
@@ -138,7 +145,7 @@ public final class Benchmarks {
 	/** While true, the server must keep ticking even with no players online. */
 	public static boolean isRunning() {
 		// Harness test servers keep ticking without players too.
-		return running || TickHarness.DETERMINISTIC;
+		return running || TickHarness.DETERMINISTIC || FakePlayers.isRunning();
 	}
 
 	private static boolean begin(CommandSourceStack source) {
@@ -150,7 +157,7 @@ public final class Benchmarks {
 		return true;
 	}
 
-	private static void report(CommandSourceStack source, String message) {
+	static void report(CommandSourceStack source, String message) {
 		source.sendSuccess(() -> Component.literal(message), true);
 		if (NativeBridge.isAvailable()) {
 			NativeBridge.log(NativeBridge.INFO, message);
@@ -275,6 +282,7 @@ public final class Benchmarks {
 	/** Called by {@link dev.mcrs.bridge.mixin.MinecraftServerMixin} after every tick. */
 	public static void onTick(long nanos) {
 		TickHarness.onTick(nanos);
+		FakePlayers.onTick(nanos);
 		EntityBench bench = entityBench;
 		if (bench != null && bench.record(nanos)) {
 			entityBench = null;

@@ -20,6 +20,7 @@ public abstract class MinecraftServerMixin {
 	@Inject(method = "tickServer", at = @At("HEAD"))
 	private void mcrs$tickStart(BooleanSupplier hasTimeLeft, CallbackInfo ci) {
 		mcrs$tickStart = System.nanoTime();
+		dev.mcrs.bridge.FakePlayers.onTickStart();
 	}
 
 	@Inject(method = "tickServer", at = @At("RETURN"))
