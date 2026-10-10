@@ -88,10 +88,37 @@ fn main() {
         })
     };
 
+    // LOAD_THREADS=n: other threads replay the same fills meanwhile, as the server's workers do.
+    let load_threads: usize = std::env::var("LOAD_THREADS").ok().map_or(0, |v| v.parse().unwrap());
+    let generator = Arc::new(generator);
+    let recorded = Arc::new(recorded);
+    for t in 0..load_threads {
+        let (generator, recorded, stop) = (generator.clone(), recorded.clone(), stop.clone());
+        std::thread::spawn(move || {
+            let mut i = t * 37;
+            while !stop.load(Ordering::Relaxed) && !recorded.is_empty() {
+                let (cx, cz, fill_min_y, fill_height, p) = &recorded[i % recorded.len()];
+                let biomes = BiomeArea { chunk_x: *cx, chunk_z: *cz, min_quart_y: p[10], quart_height: p[11], ids: p[12..].iter().map(|v| *v as u32).collect() };
+                let input = SurfaceInput {
+                    biomes: &biomes,
+                    gen: GenContext { min_gen_y: p[5], gen_depth: p[6], sea_level: p[7] },
+                    gen_min_y: p[3],
+                    gen_max_y: p[4],
+                    default_block: p[8] as u32,
+                    plain_air: p[9] as u32,
+                    sea_level: p[7],
+                    noise_volume: DensityVolume::new([16, *fill_height, 16], [cx << 4, *fill_min_y, cz << 4], [1, 1, 1]),
+                };
+                let params = FillParams { chunk_min_y: p[0], chunk_height: p[1], surface: (p[2] == 1).then_some(input) };
+                std::hint::black_box(generator.fill(*cx, *cz, *fill_min_y, *fill_height, Default::default(), &params));
+                i += 1;
+            }
+        });
+    }
     let start = Instant::now();
     let mut chunks = 0u64;
     'outer: loop {
-        for (cx, cz, fill_min_y, fill_height, p) in &recorded {
+        for (cx, cz, fill_min_y, fill_height, p) in recorded.iter() {
             let biomes = BiomeArea { chunk_x: *cx, chunk_z: *cz, min_quart_y: p[10], quart_height: p[11], ids: p[12..].iter().map(|v| *v as u32).collect() };
             let input = SurfaceInput {
                 biomes: &biomes,
