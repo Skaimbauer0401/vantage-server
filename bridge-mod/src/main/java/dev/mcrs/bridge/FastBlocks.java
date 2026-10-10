@@ -10,6 +10,9 @@ package dev.mcrs.bridge;
  * writes (block callbacks inside it may read the position). Any full chunk status change and
  * any chunk unload clears the whole cache, so a cached answer never skips the chunk lookup
  * (and the loading or ticket it would cause) for a chunk that is not fully loaded.
+ *
+ * <p>Collision iteration ({@code BlockCollisions}) reads blocks of plain level chunks straight
+ * from their sections.
  */
 public final class FastBlocks {
 	public static final boolean ENABLED = !"false".equals(System.getProperty("mcrs.fastBlocks"));

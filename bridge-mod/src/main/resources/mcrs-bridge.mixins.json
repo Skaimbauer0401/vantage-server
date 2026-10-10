@@ -3,6 +3,7 @@
 	"package": "dev.mcrs.bridge.mixin",
 	"compatibilityLevel": "JAVA_25",
 	"server": [
+		"BlockCollisionsMixin",
 		"ChunkGeneratorTimingMixin",
 		"ChunkStatusBlockCacheMixin",
 		"ChunkStatusTasksMixin",
