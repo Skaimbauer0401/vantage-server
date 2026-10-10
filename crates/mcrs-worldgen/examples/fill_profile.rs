@@ -171,6 +171,17 @@ fn main() {
         *lines.entry(format!("{} {}", first.1, first.0)).or_default() += count;
     }
     let total = samples.len().max(1) as f64;
+    if let Ok(filter) = std::env::var("PROFILE_FILE") {
+        // Lines of one source file, sorted by line number.
+        let mut v: Vec<_> = lines.iter().filter(|(k, _)| k.starts_with(&filter)).collect();
+        v.sort_by_key(|(k, _)| k.split([' ', ':']).nth(1).and_then(|n| n.parse::<u32>().ok()).unwrap_or(0));
+        println!("--- lines of {filter}");
+        for (name, count) in v {
+            if 100.0 * *count as f64 / total >= 0.2 {
+                println!("{:6.2}% {}", 100.0 * *count as f64 / total, &name[..name.len().min(110)]);
+            }
+        }
+    }
     for (title, map, n) in [("innermost function", &inner, 30), ("outermost (non-inlined) function", &outer, 25), ("innermost line", &lines, 30)] {
         println!("--- {title}");
         let mut v: Vec<_> = map.iter().collect();
