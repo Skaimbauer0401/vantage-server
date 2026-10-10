@@ -413,15 +413,23 @@ keep the hashes identical to vanilla's.
 
 | Scenario | Vanilla | mcrs | Change |
 |---|---|---|---|
-| 1500 mobs + boats/minecarts/shulkers (mean tick) | 35.0 ms | 28.7 ms | -18% |
+| 1500 mobs + boats/minecarts/shulkers (mean tick) | 36.5-37.2 ms | 22.6-23.5 ms | -37% (1.6x) |
 | 320 redstone clock units (mean / p95 tick) | 41-44 / 186-209 ms | 22 / 91-94 ms | 1.9x |
 
 - Entity collisions: queries for entities that act like blocks visit only each section's
   possibly-collidable entities (same list, same order).
 - Block states: exact cache in front of `Level.getBlockState` on the server thread (invalidated on
   every chunk write, chunk status change and unload).
-- Next: entity pushing / sensor queries (spatial index that keeps vanilla's result order), block
-  collision reads, villager POI lookups.
+- Entity grid: each entity section files entities by the 2x2 block cell of their box's minimum
+  corner; box queries (pushing, item merging, small searches) visit only cells that can hold a
+  hit and return hits in section-list order (join order). Mobs: 28.2 -> 23.5 ms.
+- POI: per unpacked column bit mask of present POI sections; empty columns skip the 24 lookups.
+- Nearest living entity / item sensors: stable sort on precomputed distances.
+- Block collisions read plain level chunks straight from their sections (~2%).
+- Remaining mob profile: block collisions ~13% (block reads, shape building), AI spread out,
+  entity queries ~7% (mostly 33-block sensor boxes, which scan whole sections), inside-block
+  effects ~7% with no single hot spot. Bigger gains need a vanilla-exact rewrite of
+  `Entity.collide` (no shape lists).
 
 ## 11. Next Steps
 
