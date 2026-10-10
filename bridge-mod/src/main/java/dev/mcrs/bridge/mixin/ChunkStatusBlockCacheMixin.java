@@ -22,5 +22,6 @@ public abstract class ChunkStatusBlockCacheMixin {
 	@Inject(method = "onFullChunkStatusChange", at = @At("HEAD"))
 	private void mcrs$clear(ChunkPos pos, FullChunkStatus status, CallbackInfo ci) {
 		((FastBlocks.Cache) level).mcrs$clearBlockCache();
+		((FastBlocks.BiomeCache) level.getBiomeManager()).mcrs$clearBiomeCache();
 	}
 }

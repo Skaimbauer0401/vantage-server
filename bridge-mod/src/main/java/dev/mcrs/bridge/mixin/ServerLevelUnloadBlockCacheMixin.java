@@ -14,5 +14,6 @@ public abstract class ServerLevelUnloadBlockCacheMixin {
 	@Inject(method = "unload", at = @At("HEAD"))
 	private void mcrs$clear(LevelChunk chunk, CallbackInfo ci) {
 		((FastBlocks.Cache) this).mcrs$clearBlockCache();
+		((FastBlocks.BiomeCache) ((ServerLevel) (Object) this).getBiomeManager()).mcrs$clearBiomeCache();
 	}
 }

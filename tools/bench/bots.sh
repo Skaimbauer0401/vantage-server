@@ -21,5 +21,5 @@ LOG="$DIR/bots-$5.log"
 WAIT=${6:-$(( $3 / 20 + 40 ))}
 ( sleep 25
   echo "mcrs bots $1 $2 $3"; sleep "$WAIT"
-  echo stop; sleep 25 ) | MCRS_RUN_DIR="$DIR" MCRS_AOT_CACHE=0 MCRS_JVM_OPTIONS="$4" ./target/release/mcrs > "$LOG" 2>&1
+  echo stop; sleep 25 ) | MCRS_RUN_DIR="$DIR" MCRS_AOT_CACHE=0 MCRS_JVM_OPTIONS="-Dmcrs.deterministic=1 $4" ./target/release/mcrs > "$LOG" 2>&1
 sed 's/\x1b\[[0-9;]*m//g' "$LOG" | grep -a "mcrs::java" | grep -ao "\[bots\].*" | tail -1

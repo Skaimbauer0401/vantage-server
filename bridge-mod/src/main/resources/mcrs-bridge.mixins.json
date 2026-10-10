@@ -3,8 +3,11 @@
 	"package": "dev.mcrs.bridge.mixin",
 	"compatibilityLevel": "JAVA_25",
 	"server": [
+		"BiomeManagerCacheMixin",
 		"BlockCollisionsMixin",
+		"ChunkBiomeFillCacheMixin",
 		"ChunkGeneratorTimingMixin",
+		"ChunkMapViewAccessor",
 		"ChunkStatusBlockCacheMixin",
 		"ChunkStatusTasksMixin",
 		"CommandsMixin",
@@ -45,6 +48,7 @@
 		"SkyLightSectionStorageInvoker",
 		"SkyLightSourcesMixin",
 		"StructureTemplatePaletteMixin",
+		"TrackedEntityMixin",
 		"WorldGenRegionAccessor",
 		"ThreadedLevelLightEngineMixin"
 	],
