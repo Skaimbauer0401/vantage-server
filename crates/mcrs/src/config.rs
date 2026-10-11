@@ -12,6 +12,9 @@ pub struct Config {
     pub minecraft_version: String,
     pub fabric_loader_version: String,
     pub fabric_installer_version: String,
+    /// Game behavior: "vanilla" (exact vanilla), "balanced" (+ activation range) or
+    /// "performance" (further from vanilla, Paper/Pufferfish-like). See README.
+    pub edition: Edition,
     /// Server directory (worlds, mods, server.properties, eula.txt).
     pub run_dir: PathBuf,
     /// JDK to embed. Empty = MCRS_JAVA_HOME, JAVA_HOME, then `.tools/jdk-*`.
@@ -33,12 +36,32 @@ pub struct Config {
     pub aot_cache: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Edition {
+    #[default]
+    Vanilla,
+    Balanced,
+    Performance,
+}
+
+impl Edition {
+    pub fn name(self) -> &'static str {
+        match self {
+            Edition::Vanilla => "vanilla",
+            Edition::Balanced => "balanced",
+            Edition::Performance => "performance",
+        }
+    }
+}
+
 impl Default for Config {
     fn default() -> Self {
         Config {
             minecraft_version: "26.3".into(),
             fabric_loader_version: "0.19.5".into(),
             fabric_installer_version: "1.1.2".into(),
+            edition: Edition::Vanilla,
             run_dir: "run".into(),
             java_home: None,
             max_memory: "4G".into(),

@@ -136,6 +136,11 @@ public final class FakePlayers {
 	}
 
 	public static int start(CommandSourceStack source, int count, double speed, int ticks) {
+		return start(source, count, speed, ticks, 200, 20);
+	}
+
+	/** Bots starting {@code radius} blocks from 0,0, {@code height} blocks above the terrain. */
+	public static int start(CommandSourceStack source, int count, double speed, int ticks, double radius, int height) {
 		if (run != null) {
 			source.sendFailure(Component.literal("Bots are already running"));
 			return 0;
@@ -147,8 +152,8 @@ public final class FakePlayers {
 			double angle = 2 * Math.PI * i / count;
 			double dirX = Math.cos(angle);
 			double dirZ = Math.sin(angle);
-			double x = dirX * 200;
-			double z = dirZ * 200;
+			double x = dirX * radius;
+			double z = dirZ * radius;
 			String name = "bot" + i;
 			GameProfile profile = new GameProfile(UUIDUtil.createOfflinePlayerUUID(name), name);
 			ClientInformation defaults = ClientInformation.createDefault();
@@ -158,7 +163,7 @@ public final class FakePlayers {
 			ServerPlayer player = new ServerPlayer(server, level, profile, info);
 			int ground = level.getChunk((int) Math.floor(x) >> 4, (int) Math.floor(z) >> 4).getHeight(Heightmap.Types.MOTION_BLOCKING, (int) Math.floor(x) & 15,
 					(int) Math.floor(z) & 15);
-			player.snapTo(x, ground + 20, z, (float) Math.toDegrees(Math.atan2(-dirX, dirZ)), 0.0F);
+			player.snapTo(x, ground + height, z, (float) Math.toDegrees(Math.atan2(-dirX, dirZ)), 0.0F);
 			FakeConnection connection = new FakeConnection();
 			server.getPlayerList().placeNewPlayer(connection, player, new CommonListenerCookie(profile, 0, info, false));
 			player.setGameMode(GameType.CREATIVE);
@@ -169,7 +174,7 @@ public final class FakePlayers {
 			player.connection.tick();
 			bots.add(new Bot(player, connection, dirX, dirZ, x, z));
 		}
-		run = new Run(source, bots, speed, ticks);
+		run = new Run(source, bots, speed, ticks, height);
 		Benchmarks.report(source, String.format(Locale.ROOT, "[bots] %d bots flying at %.2f blocks/tick for %d ticks", count, speed, ticks));
 		return 1;
 	}
@@ -199,13 +204,15 @@ public final class FakePlayers {
 		final CommandSourceStack source;
 		final List<Bot> bots;
 		final double speed;
+		final int height;
 		final long[] nanos;
 		int tick;
 
-		Run(CommandSourceStack source, List<Bot> bots, double speed, int ticks) {
+		Run(CommandSourceStack source, List<Bot> bots, double speed, int ticks, int height) {
 			this.source = source;
 			this.bots = bots;
 			this.speed = speed;
+			this.height = height;
 			this.nanos = new long[ticks];
 		}
 
@@ -222,7 +229,7 @@ public final class FakePlayers {
 				int bx = (int) Math.floor(bot.x);
 				int bz = (int) Math.floor(bot.z);
 				if (level.hasChunk(bx >> 4, bz >> 4)) {
-					bot.y = level.getHeight(Heightmap.Types.MOTION_BLOCKING, bx, bz) + 20;
+					bot.y = level.getHeight(Heightmap.Types.MOTION_BLOCKING, bx, bz) + height;
 				}
 				player.connection.handleMovePlayer(new ServerboundMovePlayerPacket.Pos(bot.x, bot.y, bot.z, false, false));
 				player.connection.handleClientTickEnd(net.minecraft.network.protocol.game.ServerboundClientTickEndPacket.INSTANCE);
@@ -266,7 +273,8 @@ public final class FakePlayers {
 			String summary = String.format(Locale.ROOT, "[bots] %d ticks, mean %.3f ms, median %.3f ms, p95 %.3f ms, %d chunk packets", nanos.length, mean, median, p95,
 					chunks);
 			Benchmarks.report(source, summary);
-			Benchmarks.report(source, String.format(Locale.ROOT, "[bots] mob ticks skipped by the activation range: %d", ActivationRange.SKIPPED.get()));
+			Benchmarks.report(source, String.format(Locale.ROOT, "[bots] mob ticks skipped by the activation range: %d, goal/brain selections skipped: %d",
+					ActivationRange.SKIPPED.get(), BrainThrottle.SKIPPED.get()));
 			if (Boolean.getBoolean("mcrs.biomeCache.verify")) {
 				Benchmarks.report(source, String.format(Locale.ROOT, "[bots] biome cache verify: %d hits identical, %d differ", FastBlocks.BIOME_VERIFIED.get(),
 						FastBlocks.BIOME_MISMATCHED.get()));

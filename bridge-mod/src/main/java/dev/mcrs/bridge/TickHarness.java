@@ -160,6 +160,11 @@ public final class TickHarness {
 			blockHash = 0;
 			blockChanges = 0;
 			run = new Run(source, cache, center, scenario, ticks, hash, Thread.currentThread());
+			if (Boolean.getBoolean("mcrs.harness.watcher")) {
+				// A player standing in the middle, for the editions that slow down distant mobs.
+				command(server, quiet, "gamerule spawn_mobs false");
+				FakePlayers.start(source, 1, 0.0, ticks, 0.0, 2);
+			}
 		}
 	}
 
@@ -353,8 +358,32 @@ public final class TickHarness {
 					command(server, s, String.format(Locale.ROOT, "setblock %d %d %d minecraft:redstone_lamp", x, y, z + 15));
 				}
 			}
+			case "hoppers" -> {
+				// Hoppers as in bases: a quarter move items from a full chest into a chest below,
+				// the rest wait idle under air or under an empty chest.
+				if (size > 1600) {
+					return "hoppers size is at most 1600";
+				}
+				for (int i = 0; i < size; i++) {
+					int x = -60 + (i % 40) * 3;
+					int z = -60 + (i / 40) * 3;
+					switch (i % 4) {
+						case 0 -> {
+							command(server, s, String.format(Locale.ROOT, "setblock %d %d %d minecraft:chest", x, y, z));
+							command(server, s, String.format(Locale.ROOT, "setblock %d %d %d minecraft:hopper[facing=down]", x, y + 1, z));
+							command(server, s, String.format(Locale.ROOT,
+									"setblock %d %d %d minecraft:chest{Items:[{Slot:0b,id:\"minecraft:cobblestone\",count:64},{Slot:1b,id:\"minecraft:dirt\",count:64}]}", x, y + 2, z));
+						}
+						case 1 -> command(server, s, String.format(Locale.ROOT, "setblock %d %d %d minecraft:hopper[facing=down]", x, y, z));
+						default -> {
+							command(server, s, String.format(Locale.ROOT, "setblock %d %d %d minecraft:hopper[facing=down]", x, y, z));
+							command(server, s, String.format(Locale.ROOT, "setblock %d %d %d minecraft:chest", x, y + 1, z));
+						}
+					}
+				}
+			}
 			default -> {
-				return "unknown scenario " + scenario + " (mobs, redstone)";
+				return "unknown scenario " + scenario + " (mobs, redstone, farm, hoppers)";
 			}
 		}
 		return null;

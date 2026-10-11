@@ -32,8 +32,9 @@ fn main() -> Result<()> {
 
     let java_home = setup::find_java_home(&config, &project_dir)?;
     tracing::info!(
-        "mcrs {} | Minecraft {} | Fabric Loader {} | JDK {}",
+        "mcrs {} | {} edition | Minecraft {} | Fabric Loader {} | JDK {}",
         env!("CARGO_PKG_VERSION"),
+        config.edition.name(),
         config.minecraft_version,
         config.fabric_loader_version,
         java_home.display()
@@ -109,6 +110,8 @@ fn run_server(config: &Config, java_home: &Path) -> Result<()> {
         options.push("-XX:+UnlockDiagnosticVMOptions".into());
         options.push("-XX:-UseLibmIntrinsic".into());
     }
+    // Before jvm_options so that they can override single switches.
+    options.push(format!("-Dmcrs.edition={}", config.edition.name()));
     options.extend(config.jvm_options.iter().cloned());
     // One-off extras (profiling etc.) without editing mcrs.toml.
     if let Ok(extra) = std::env::var("MCRS_JVM_OPTIONS") {
