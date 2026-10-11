@@ -98,6 +98,9 @@ fn aot_options(config: &Config, java_home: &Path, options: &[String]) -> Result<
     Ok(vec![format!("-XX:AOTCacheOutput={path}")])
 }
 
+/// Approximation level for `-Dmcrs.approxWorldgen=true` (`mcrs_worldgen::approx`).
+const DEFAULT_APPROXIMATION: u8 = 1;
+
 fn run_server(config: &Config, java_home: &Path) -> Result<()> {
     let mut options = vec![
         format!("-Djava.class.path={}", setup::FABRIC_LAUNCHER_JAR),
@@ -116,6 +119,27 @@ fn run_server(config: &Config, java_home: &Path) -> Result<()> {
     // One-off extras (profiling etc.) without editing mcrs.toml.
     if let Ok(extra) = std::env::var("MCRS_JVM_OPTIONS") {
         options.extend(extra.split_whitespace().map(String::from));
+    }
+    // Approximate terrain: off unless -Dmcrs.approxWorldgen=<level> (1-3) or true; it is only a
+    // few percent faster (see README), so even the performance edition generates exactly.
+    let approx = options
+        .iter()
+        .rev()
+        .find_map(|o| o.strip_prefix("-Dmcrs.approxWorldgen=").map(|v| match v {
+            "true" => DEFAULT_APPROXIMATION,
+            "false" => 0,
+            v => v.parse().unwrap_or(0),
+        }))
+        .unwrap_or(0);
+    mcrs_jvm::set_worldgen_approximation(approx);
+    options.push(format!("-Dmcrs.approxWorldgen={approx}"));
+    if approx > 0 {
+        tracing::info!("approximate terrain generation, level {approx} (not block for block like vanilla)");
+    }
+    // Chunky (if installed) keeps only 50 chunks in flight by default, too few to keep this
+    // server's generation busy; it reads this property. Doesn't change what is generated.
+    if !options.iter().any(|o| o.starts_with("-Dchunky.maxWorkingCount=")) {
+        options.push("-Dchunky.maxWorkingCount=500".into());
     }
     // MCRS_AOT_CACHE=0: off for this run (benchmarks that vary JVM options).
     if config.aot_cache && std::env::var("MCRS_AOT_CACHE").as_deref() != Ok("0") {

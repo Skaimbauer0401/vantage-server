@@ -16,6 +16,12 @@ use jni::objects::{JObject, JValue};
 use jni::sys::{jint, JavaVMInitArgs, JavaVMOption, JNI_OK, JNI_TRUE, JNI_VERSION_10};
 use jni::JavaVM;
 
+/// Pumpkin-style approximate terrain (0 = exact); must be set before the JVM loads the
+/// generators. See `mcrs_worldgen::approx`.
+pub fn set_worldgen_approximation(level: u8) {
+    mcrs_worldgen::approx::set_level(level);
+}
+
 type CreateJavaVm =
     unsafe extern "system" fn(*mut *mut jni::sys::JavaVM, *mut *mut c_void, *mut c_void) -> jint;
 

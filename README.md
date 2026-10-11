@@ -14,7 +14,7 @@ Measured on a laptop (i7-11800H), same JDK and settings, mean tick time (lower i
 | 1500 mobs next to a player | 45.8 ms | 32.2 ms | n/a | 33.6 ms |
 | 320 redstone clocks | 44.4 ms | 25.2 ms | n/a | 8.9 ms |
 | 1600 hoppers | 1.6 ms | 1.7 ms | n/a | 1.2 ms |
-| Chunk generation (Chunky, 35k chunks) | 144 chunks/s | 230 chunks/s | same | same |
+| Chunk generation (Chunky, chunks/s, higher is better) | 135 | 306 | same | same |
 
 n/a: balanced only differs from `vanilla` for mobs away from players. Mobs right next to
 players gain nothing more from the performance edition either, since its mob changes only act
@@ -47,12 +47,21 @@ The performance edition adds:
   today's update order can behave differently.
 
 World generation stays exact in every edition (seeds and structures match vanilla), and Fabric
-mods work in all three. Every change has its own switch (JVM option in `jvm_options`) that
+mods work in all three. An approximate terrain mode like Pumpkin's (`-Dmcrs.approxWorldgen=1..3`:
+fewer noise octaves, coarser interpolation cells; terrain roughly the same, not block for block)
+exists, but it is only 1-6% faster in a real pregeneration (the exact Rust terrain is already
+cheap; saving and scheduling dominated), so no edition turns it on.
+
+Chunk generation: chunks are serialized and compressed in parallel instead of on vanilla's
+single chunk IO thread (byte-identical files; `-Dmcrs.parallelSave=false` turns it off), and
+Chunky gets 500 chunks in flight instead of 50 (`-Dchunky.maxWorkingCount`). Chunky on a fresh
+world, chunks/s: vanilla 135 (154 with 500 in flight), Vantage 0.2.0 227 (300), now 306. Every change has its own switch (JVM option in `jvm_options`) that
 overrides the edition, e.g. `-Dmcrs.redstoneExperiments=false`, `-Dmcrs.brainThrottle=false`,
 `-Dmcrs.activationRange=true`; the exact optimizations can be turned off too, e.g.
 `-Dmcrs.worldgen=false`, `-Dmcrs.fastEntities=false`, `-Dmcrs.fastBlocks=false`.
 
-Benchmarks: `tools/bench/tps.sh` (TPS of all scenarios), `tools/bench/gen.sh` (generation),
+Benchmarks: `tools/bench/tps.sh` (TPS of all scenarios), `tools/bench/chunky.sh` (Chunky
+pregeneration, with `/mcrs genstats`), `tools/bench/gen.sh` (generation),
 `tools/bench/tick.sh` (exactness harness). See [PLAN.md](PLAN.md) for design notes and results.
 
 ## Requirements

@@ -1157,7 +1157,9 @@ impl Surface {
             veins: Vec::new(),
         };
         run.zoom.init_chunk(full.min_x, full.min_z, chunk.min_y, chunk.max_y() + 16);
+        let prefill_start = std::time::Instant::now();
         let rule = run.compile(&self.rule);
+        PREFILL_NANOS.fetch_add(prefill_start.elapsed().as_nanos() as u64, std::sync::atomic::Ordering::Relaxed);
         let mut variants = run.variants(&rule);
         let min_bx = full.min_x;
         let min_bz = full.min_z;
@@ -1232,6 +1234,9 @@ impl Surface {
         }
     }
 }
+
+/// Time spent prefilling ore vein volumes (diagnostics).
+pub static PREFILL_NANOS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 /// `BlockColumn.setBlock` of `MaterialSystem.buildSurface`.
 #[allow(clippy::too_many_arguments)]

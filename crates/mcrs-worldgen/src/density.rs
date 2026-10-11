@@ -286,6 +286,11 @@ fn parse_noise(v: &Value, built: &[Arc<dyn Noise>]) -> Result<Arc<dyn Noise>, Lo
                     amplitude: f32::from_bits(as_i64(field(layer, "amplitude")?)? as u32),
                 });
             }
+            let threshold = crate::approx::octave_threshold();
+            if threshold > 0.0 && stack.layers.len() > 2 {
+                let total: f32 = stack.layers.iter().map(|l| l.amplitude.abs()).sum();
+                stack.layers.retain(|l| l.amplitude.abs() >= threshold * total);
+            }
             Arc::new(stack)
         }
         other => return err(format!("noise type {other}")),
@@ -446,13 +451,21 @@ impl Graph {
                     lower: i(v, "lowerBound")?,
                     cell_height: i(v, "cellHeight")?,
                 },
-                "InterpolatedFunction$Sampler" => Node::Interpolated {
-                    input: n(v, "input")?,
-                    cell_xz: i(v, "cellSizeXz")?,
-                    cell_y: i(v, "cellSizeY")?,
-                    inv_xz: f(v, "cellSizeXzInv")?,
-                    inv_y: f(v, "cellSizeYInv")?,
-                },
+                "InterpolatedFunction$Sampler" => {
+                    let (scale_y, scale_xz) = crate::approx::cell_scale();
+                    if scale_y == 1 && scale_xz == 1 {
+                        Node::Interpolated {
+                            input: n(v, "input")?,
+                            cell_xz: i(v, "cellSizeXz")?,
+                            cell_y: i(v, "cellSizeY")?,
+                            inv_xz: f(v, "cellSizeXzInv")?,
+                            inv_y: f(v, "cellSizeYInv")?,
+                        }
+                    } else {
+                        let (cell_xz, cell_y) = (i(v, "cellSizeXz")? * scale_xz, i(v, "cellSizeY")? * scale_y);
+                        Node::Interpolated { input: n(v, "input")?, cell_xz, cell_y, inv_xz: 1.0 / cell_xz as f32, inv_y: 1.0 / cell_y as f32 }
+                    }
+                }
                 "SliceFunction$XSampler" => Node::SliceX(n(v, "input")?, i(v, "x")?),
                 "SliceFunction$YSampler" => Node::SliceY(n(v, "input")?, i(v, "y")?),
                 "SliceFunction$ZSampler" => Node::SliceZ(n(v, "input")?, i(v, "z")?),
