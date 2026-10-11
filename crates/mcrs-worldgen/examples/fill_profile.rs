@@ -47,6 +47,8 @@ fn main() {
         None => Vec::new(),
     };
     let json: serde_json::Value = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+    // APPROX=<level>: profile the approximate generator.
+    mcrs_worldgen::approx::set_level(std::env::var("APPROX").ok().map_or(0, |v| v.parse().unwrap()));
     let generator = Generator::from_json(&json).unwrap();
     let (min_y, height) = (-64, 384);
     let quart_height = height / 4;

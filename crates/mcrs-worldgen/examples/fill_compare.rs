@@ -72,16 +72,20 @@ fn main() {
             }
             if round == 1 {
                 times[k] = start.elapsed().as_secs_f64() * 1e3 / recorded.len() as f64;
+                let p = Generator::take_phase_nanos();
+                let n = recorded.len() as f64 * 1e6;
+                println!(
+                    "{}: density {:.2}, blocks+aquifer {:.2}, surface {:.2} (vein prefill {:.2})",
+                    if k == 0 { "exact" } else { "approximate" },
+                    p[1] as f64 / n, p[2] as f64 / n, p[3] as f64 / n,
+                    mcrs_worldgen::surface::PREFILL_NANOS.swap(0, std::sync::atomic::Ordering::Relaxed) as f64 / n
+                );
+            } else {
+                Generator::take_phase_nanos();
+                mcrs_worldgen::surface::PREFILL_NANOS.swap(0, std::sync::atomic::Ordering::Relaxed);
             }
         }
     }
-    let phases = Generator::take_phase_nanos();
-    let n = (4 * recorded.len()) as f64 * 1e6;
-    println!(
-        "phases ms/chunk (both generators): aquifer setup {:.2}, density {:.2}, blocks+aquifer {:.2}, surface {:.2} (vein prefill {:.2}), output {:.2}",
-        phases[0] as f64 / n, phases[1] as f64 / n, phases[2] as f64 / n, phases[3] as f64 / n,
-        mcrs_worldgen::surface::PREFILL_NANOS.swap(0, std::sync::atomic::Ordering::Relaxed) as f64 / n, phases[4] as f64 / n
-    );
     // Difference: surface heights and blocks.
     let (mut columns, mut same_height, mut sum_dh, mut max_dh) = (0u64, 0u64, 0u64, 0i32);
     let (mut total_blocks, mut same_blocks, mut same_top) = (0u64, 0u64, 0u64);
