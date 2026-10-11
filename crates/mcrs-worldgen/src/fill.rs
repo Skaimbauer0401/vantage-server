@@ -665,12 +665,54 @@ pub struct AquiferState {
     pub should_schedule: bool,
 }
 
+/// Time applying carving masks, summed over threads (diagnostics).
+pub static CARVE_NANOS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
 /// Per-chunk parameters beyond the noise volume.
 pub struct FillParams<'a> {
     pub chunk_min_y: i32,
     pub chunk_height: i32,
     /// Run the surface step too (needs the dimension surface export).
     pub surface: Option<SurfaceInput<'a>>,
+    /// Apply this carving mask after the surface step (only together with `surface`).
+    pub carving: Option<CarvingMask<'a>>,
+}
+
+/// Vanilla's `CarvingMask`: bit `y - min_y + (z + (x << 4)) * height` of `words` (a `BitSet`).
+pub struct CarvingMask<'a> {
+    pub min_y: i32,
+    pub max_y: i32,
+    pub words: &'a [u64],
+}
+
+impl CarvingMask<'_> {
+    fn bit(&self, i: usize) -> bool {
+        self.words.get(i / 64).is_some_and(|w| w & (1 << (i % 64)) != 0)
+    }
+
+    /// `CarvingMask.visit`: maximal runs of set bits, split into columns, in bit order.
+    fn visit(&self, mut f: impl FnMut(i32, i32, i32, i32)) {
+        let height = (self.max_y - self.min_y + 1) as usize;
+        let len = self.words.len() * 64;
+        let mut i = 0;
+        while i < len {
+            if !self.bit(i) {
+                i += 1;
+                continue;
+            }
+            let start = i;
+            while i < len && self.bit(i) {
+                i += 1;
+            }
+            let end = i - 1;
+            for column in start / height..=end / height {
+                let base = column * height;
+                let bottom = start.saturating_sub(base) as i32 + self.min_y;
+                let top = (end - base).min(height - 1) as i32 + self.min_y;
+                f((column >> 4 & 15) as i32, (column & 15) as i32, bottom, top);
+            }
+        }
+    }
 }
 
 impl Generator {
@@ -744,6 +786,11 @@ impl Generator {
             (Some(surface), Some(input)) => {
                 let noises = self.graph.noises.clone();
                 surface.build(&mut ctx, &noises, flags, &mut chunk, input);
+                if let Some(mask) = &params.carving {
+                    let start = std::time::Instant::now();
+                    self.apply_carving(&mut ctx, &noises, surface, aquifer.as_mut(), &mut chunk, input, mask);
+                    CARVE_NANOS.fetch_add(start.elapsed().as_nanos() as u64, std::sync::atomic::Ordering::Relaxed);
+                }
                 true
             }
             _ => false,
@@ -775,6 +822,61 @@ impl Generator {
         }
         lap(4);
         out
+    }
+
+    /// `NoiseBasedChunkGenerator.applyCarvingMask` (without a blending filter).
+    #[allow(clippy::too_many_arguments)]
+    fn apply_carving(
+        &self,
+        ctx: &mut Context,
+        noises: &[std::sync::Arc<dyn crate::noise::Noise>],
+        surface: &crate::surface::Surface,
+        mut aquifer: Option<&mut Aquifer>,
+        chunk: &mut ChunkBlocks,
+        input: &SurfaceInput,
+        mask: &CarvingMask,
+    ) {
+        use crate::surface::{STATE_DIRT, STATE_GRASS_OR_MYCELIUM, STATE_HAS_FLUID, STATE_UNCARVABLE};
+        let flags = &self.state_flags;
+        let (min_x, min_z) = (input.noise_volume.min_x, input.noise_volume.min_z);
+        let mut top_state = crate::surface::TopMaterialState::default();
+        mask.visit(|x, z, bottom, top| {
+            let mut has_grass = false;
+            let (wx, wz) = (min_x + x, min_z + z);
+            let mut y = top;
+            while y >= bottom {
+                let old = chunk.get(x, y, z).unwrap_or(self.air);
+                if flags[old as usize] & STATE_UNCARVABLE == 0 {
+                    if flags[old as usize] & STATE_GRASS_OR_MYCELIUM != 0 {
+                        has_grass = true;
+                    }
+                    let (state, schedule) = match aquifer.as_deref_mut() {
+                        Some(a) => {
+                            let s = a.compute_substance(ctx, wx, y, wz, 0.0);
+                            (s, a.should_schedule)
+                        }
+                        None => (Some(self.at_global(y)), false),
+                    };
+                    if let Some(state) = state {
+                        chunk.set_block_state(x, y, z, state, flags, input.plain_air);
+                        let fluid = flags[state as usize] & STATE_HAS_FLUID != 0;
+                        if schedule && fluid {
+                            chunk.post_processing.push((wx, y, wz));
+                        }
+                        if has_grass && chunk.get(x, y - 1, z).is_some_and(|b| flags[b as usize] & STATE_DIRT != 0) {
+                            if let Some(top) = surface.top_material(&mut top_state, ctx, noises, flags, chunk, input, x, y - 1, z, fluid) {
+                                chunk.set_block_state(x, y - 1, z, top, flags, input.plain_air);
+                                if flags[top as usize] & STATE_HAS_FLUID != 0 {
+                                    chunk.post_processing.push((wx, y - 1, wz));
+                                }
+                            }
+                        }
+                    }
+                }
+                y -= 1;
+            }
+        });
+        top_state.recycle();
     }
 
     /// Benchmark helper: the minimum time (ns) of `runs` surface steps on the same

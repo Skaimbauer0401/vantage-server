@@ -125,6 +125,10 @@ public final class TerrainFill {
 			result.applyState(noiseChunk);
 			if (result.surfaceDone) {
 				SURFACE_DONE.add(chunk);
+				if (result.carved) {
+					Carvers.DONE.add(chunk);
+					Carvers.CARVED.incrementAndGet();
+				}
 			}
 		} finally {
 			result.close();
@@ -178,8 +182,22 @@ public final class TerrainFill {
 		}
 		ChunkPos pos = chunk.getPos();
 		int[] params = params(chunk, settings, generator, surfaceInRust(noiseChunk));
+		// Carving: with the surface in Rust, Rust also applies vanilla's carving mask.
+		boolean carve = Carvers.ENABLED && params[2] == 1 && generator instanceof net.minecraft.world.level.levelgen.NoiseBasedChunkGenerator;
+		if (carve) {
+			var region = (net.minecraft.server.level.WorldGenRegion) Reflect.get(BIOME_MANAGERS.get(chunk), "noiseBiomeSource");
+			int[] mask = Carvers.maskInts((net.minecraft.world.level.levelgen.NoiseBasedChunkGenerator) generator, chunk, randomState, region);
+			int[] joined = java.util.Arrays.copyOf(params, params.length + mask.length);
+			System.arraycopy(mask, 0, joined, params.length, mask.length);
+			params = joined;
+		}
 		MemorySegment buffer = NativeBridge.wgFill(handle, pos.x(), pos.z(), volume.minBlockY(), volume.sizeY(), beard, params);
-		return buffer == null ? null : new Result(buffer, volume);
+		if (buffer == null) {
+			return null;
+		}
+		Result result = new Result(buffer, volume);
+		result.carved = carve;
+		return result;
 	}
 
 	/** See wg_fill in crates/mcrs-jvm/src/worldgen.rs. */
@@ -272,6 +290,8 @@ public final class TerrainFill {
 		private long offset;
 
 		final boolean surfaceDone;
+		/** Rust applied the carving mask too. */
+		boolean carved;
 		private final List<int[]> sectionPalettes = new ArrayList<>();
 		private final List<int[]> sectionCounts = new ArrayList<>();
 		private final List<long[]> sectionData = new ArrayList<>();
@@ -438,7 +458,9 @@ public final class TerrainFill {
 		/** Copies Rust's density-cache and aquifer state into the chunk's NoiseChunk. */
 		void applyState(NoiseChunk noiseChunk) {
 			SamplerContext context = Reflect.context(noiseChunk);
-			for (int id = 0; id < cells.size(); id++) {
+			// After carving the noise chunk is closed, so its density caches are no longer used:
+			// they only differ in which single block topMaterial sampled last.
+			for (int id = 0; id < (carved ? 0 : cells.size()); id++) {
 				CellState rust = cells.get(id);
 				Object cell = Reflect.cacheCell(context, id);
 				ScopedDensityBuffer old = Reflect.cellBuffer(cell);
@@ -537,7 +559,9 @@ public final class TerrainFill {
 				}
 			}
 			SamplerContext context = Reflect.context(noiseChunk);
-			for (int id = 0; id < cells.size(); id++) {
+			// After carving the noise chunk is closed, so its density caches are no longer used:
+			// they only differ in which single block topMaterial sampled last.
+			for (int id = 0; id < (carved ? 0 : cells.size()); id++) {
 				CellState rust = cells.get(id);
 				Object cell = Reflect.cacheCell(context, id);
 				DensityVolume javaVolume = Reflect.get(cell, "volume");

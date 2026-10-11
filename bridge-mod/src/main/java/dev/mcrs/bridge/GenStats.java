@@ -53,7 +53,10 @@ public final class GenStats {
 				LANE_TASKS.get(name).sumThenReset())));
 		int filled = (int) (TerrainFill.FILLED.getAndSet(0) + TerrainFill.SKIPPED.getAndSet(0));
 		out.append("; per filled chunk ").append(StageTimes.summary(filled));
-		out.append(String.format(Locale.ROOT, "; biomes by Rust: %d chunks", Biomes.FILLED.getAndSet(0)));
+		out.append(String.format(Locale.ROOT, "; biomes by Rust: %d chunks, carving by Rust: %d chunks", Biomes.FILLED.getAndSet(0), Carvers.CARVED.getAndSet(0)));
+		if (TerrainFill.VERIFY) {
+			out.append(String.format(Locale.ROOT, "; terrain verify: %d chunks compared, %d differ", TerrainFill.VERIFIED.get(), TerrainFill.MISMATCHED.get()));
+		}
 		if (Biomes.VERIFY) {
 			out.append(String.format(Locale.ROOT, " (verify: %d identical, %d ties, %d differ)", Biomes.VERIFIED.get(), Biomes.TIES.get(), Biomes.MISMATCHED.get()));
 		}

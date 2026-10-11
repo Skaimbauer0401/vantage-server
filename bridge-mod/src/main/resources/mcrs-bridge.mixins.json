@@ -44,6 +44,7 @@
 		"MinecraftServerRandomAccessor",
 		"MobBrainThrottleMixin",
 		"NaturalSpawnerMobsMemoMixin",
+		"NoiseBasedChunkGeneratorInvoker",
 		"NoiseBasedChunkGeneratorMixin",
 		"NoiseChunkAccessor",
 		"NoiseGeneratorTimingMixin",

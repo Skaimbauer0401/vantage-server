@@ -27,6 +27,12 @@ pub const STATE_COUNT_NON_EMPTY: u16 = 128;
 pub const STATE_COUNT_FLUID: u16 = 256;
 pub const STATE_COUNT_TICKING_BLOCK: u16 = 512;
 pub const STATE_COUNT_TICKING_FLUID: u16 = 1024;
+/// `BlockTags.UNCARVABLE`
+pub const STATE_UNCARVABLE: u16 = 2048;
+/// `Blocks.GRASS_BLOCK` or `Blocks.MYCELIUM`
+pub const STATE_GRASS_OR_MYCELIUM: u16 = 4096;
+/// `Blocks.DIRT`
+pub const STATE_DIRT: u16 = 8192;
 
 /// `DimensionType.WAY_BELOW_MIN_Y`
 const WAY_BELOW_MIN_Y: i32 = -2032 << 4;
@@ -1237,6 +1243,101 @@ impl Surface {
 
 /// Time spent prefilling ore vein volumes (diagnostics).
 pub static PREFILL_NANOS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// State of `Surface::top_material` kept for one chunk: compiling the rule (which prefills
+/// ore vein volumes) once instead of per call. Vein values elsewhere are sampled per point,
+/// which gives the same values.
+#[derive(Default)]
+pub struct TopMaterialState {
+    rule: Option<Compiled>,
+    veins: Vec<Vein>,
+    zoom: Option<ColumnZoom>,
+    volume: Option<DensityVolume>,
+}
+
+impl TopMaterialState {
+    pub fn recycle(&mut self) {
+        for vein in self.veins.drain(..) {
+            crate::density::recycle([vein.density, vein.richness]);
+        }
+    }
+}
+
+impl Surface {
+    /// `MaterialSystem.topMaterial`: the surface rule for one block with stone depth 1 above
+    /// and below, water just above it if `under_fluid`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn top_material(
+        &self,
+        state: &mut TopMaterialState,
+        ctx: &mut Context,
+        noises: &[std::sync::Arc<dyn Noise>],
+        flags: &[u16],
+        chunk: &ChunkBlocks,
+        input: &SurfaceInput,
+        x: i32,
+        y: i32,
+        z: i32,
+        under_fluid: bool,
+    ) -> Option<u32> {
+        let bx = input.noise_volume.min_x + x;
+        let bz = input.noise_volume.min_z + z;
+        let volume = *state.volume.get_or_insert(DensityVolume::new([1, 1, 1], [bx, y, bz], [1, 1, 1]));
+        let zoom = state.zoom.take().unwrap_or_else(|| {
+            let mut zoom = ColumnZoom::new();
+            zoom.init_chunk(input.noise_volume.min_x, input.noise_volume.min_z, chunk.min_y, chunk.max_y() + 16);
+            zoom
+        });
+        let mut run = Run {
+            s: self,
+            noises,
+            flags,
+            ctx,
+            biomes: input.biomes,
+            gen: input.gen,
+            sea_level: input.sea_level,
+            expected_volume: volume,
+            preliminary_volume: DensityVolume::new([1, 1, 1], [volume.min_x, 0, volume.min_z], [1, 1, 1]),
+            preliminary_buffer: None,
+            block_x: 0,
+            block_y: 0,
+            block_z: 0,
+            gradient_x: 0,
+            gradient_z: 0,
+            surface_depth: 0,
+            surface_secondary: None,
+            min_surface_level: None,
+            biome: None,
+            water_height: 0,
+            stone_below: 0,
+            stone_above: 0,
+            noise_2d: vec![(0, 0.0); noises.len()],
+            noise_3d: vec![(0, 0.0); noises.len()],
+            update_xz: 0,
+            update_y: 0,
+            zoom,
+            veins: std::mem::take(&mut state.veins),
+        };
+        let rule = match state.rule.take() {
+            Some(rule) => rule,
+            None => run.compile(&self.rule),
+        };
+        let height_at = |x: i32, z: i32| chunk.world_surface[(x + z * 16) as usize] - 1;
+        let gradient_x = height_at((x + 1).min(15), z) - height_at((x - 1).max(0), z);
+        let gradient_z = height_at(x, (z + 1).min(15)) - height_at(x, (z - 1).max(0));
+        run.update_xz(bx, bz, gradient_x, gradient_z);
+        run.zoom.reset(bx, bz);
+        run.update_y(1, 1, if under_fluid { y + 1 } else { i32::MIN }, y);
+        let result = run.apply(&rule);
+        if let Some(b) = run.preliminary_buffer.take() {
+            crate::density::recycle([b]);
+        }
+        state.veins = std::mem::take(&mut run.veins);
+        state.zoom = Some(run.zoom);
+        state.rule = Some(rule);
+        result
+    }
+}
 
 /// `BlockColumn.setBlock` of `MaterialSystem.buildSurface`.
 #[allow(clippy::too_many_arguments)]

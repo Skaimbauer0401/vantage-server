@@ -9,7 +9,7 @@ use std::sync::{Arc, RwLock};
 use std::time::Instant;
 
 use mcrs_worldgen::density::{Beard, Rigid, TerrainAdjustment};
-use mcrs_worldgen::fill::{FillOut, FillParams, Generator};
+use mcrs_worldgen::fill::{CarvingMask, FillOut, FillParams, Generator};
 use mcrs_worldgen::noise::DensityVolume;
 use mcrs_worldgen::surface::{BiomeArea, GenContext, SurfaceInput};
 
@@ -142,7 +142,24 @@ pub extern "C" fn wg_fill(
         if p.len() < 12 {
             return -4;
         }
-        let biomes = BiomeArea { chunk_x, chunk_z, min_quart_y: p[10], quart_height: p[11], ids: p[12..].iter().map(|v| *v as u32).collect() };
+        // Biome ids (with the surface), then the carving mask:
+        // [has, minY, maxY, words, (lo, hi) per word].
+        let biome_len = if p[2] == 1 { 9 * 16 * p[11].max(0) as usize } else { 0 };
+        if p.len() < 12 + biome_len {
+            return -4;
+        }
+        let biomes = BiomeArea { chunk_x, chunk_z, min_quart_y: p[10], quart_height: p[11], ids: p[12..12 + biome_len].iter().map(|v| *v as u32).collect() };
+        let carving_ints = &p[12 + biome_len..];
+        let carving_words: Vec<u64> = if carving_ints.len() >= 4 && carving_ints[0] == 1 {
+            let n = carving_ints[3].max(0) as usize;
+            if carving_ints.len() < 4 + 2 * n {
+                return -4;
+            }
+            (0..n).map(|i| (carving_ints[4 + 2 * i] as u32 as u64) | ((carving_ints[5 + 2 * i] as u32 as u64) << 32)).collect()
+        } else {
+            Vec::new()
+        };
+        let carving = (carving_ints.len() >= 4 && carving_ints[0] == 1).then(|| CarvingMask { min_y: carving_ints[1], max_y: carving_ints[2], words: &carving_words });
         let surface = (p[2] == 1 && biomes.ids.len() == 9 * 16 * p[11] as usize).then(|| SurfaceInput {
             biomes: &biomes,
             gen: GenContext { min_gen_y: p[5], gen_depth: p[6], sea_level: p[7] },
@@ -154,9 +171,9 @@ pub extern "C" fn wg_fill(
             noise_volume: DensityVolume::new([16, height, 16], [chunk_x << 4, min_y, chunk_z << 4], [1, 1, 1]),
         });
         if handle == 1 && beard.affected.is_none() {
-            dump_fill(chunk_x, chunk_z, min_y, height, p);
+            dump_fill(chunk_x, chunk_z, min_y, height, &p[..12 + biome_len]);
         }
-        let fill_params = FillParams { chunk_min_y: p[0], chunk_height: p[1], surface };
+        let fill_params = FillParams { chunk_min_y: p[0], chunk_height: p[1], surface, carving };
         let start = Instant::now();
         let filled = generator.fill(chunk_x, chunk_z, min_y, height, beard, &fill_params);
         NANOS.fetch_add(start.elapsed().as_nanos() as u64, Ordering::Relaxed);
@@ -321,6 +338,11 @@ pub fn report_stats() {
             target: "mcrs::worldgen",
             "fill phases ms/chunk: aquifer setup {:.2}, density {:.2}, blocks+aquifer {:.2}, surface {:.2}, output {:.2}",
             ms(p[0]), ms(p[1]), ms(p[2]), ms(p[3]), ms(p[4])
+        );
+        tracing::info!(
+            target: "mcrs::worldgen",
+            "carving ms/chunk: {:.2}",
+            ms(mcrs_worldgen::fill::CARVE_NANOS.swap(0, Ordering::Relaxed))
         );
     }
 }

@@ -43,7 +43,7 @@ fn run(generator: &Generator, r: &Recorded) -> FillOut {
         sea_level: p[7],
         noise_volume: DensityVolume::new([16, *fill_height, 16], [cx << 4, *fill_min_y, cz << 4], [1, 1, 1]),
     };
-    let params = FillParams { chunk_min_y: p[0], chunk_height: p[1], surface: (p[2] == 1).then_some(input) };
+    let params = FillParams { chunk_min_y: p[0], chunk_height: p[1], surface: (p[2] == 1).then_some(input), carving: None };
     generator.fill(*cx, *cz, *fill_min_y, *fill_height, Default::default(), &params)
 }
 

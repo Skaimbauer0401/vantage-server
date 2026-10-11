@@ -74,6 +74,31 @@ public abstract class NoiseBasedChunkGeneratorMixin {
 	private void mcrs$verifySurface(ChunkAccess chunk, NoiseChunk noiseChunk, RandomState randomState, BiomeManager biomeManager,
 			Set<Holder<Biome>> possibleBiomes, MaterialRule materialRule, CallbackInfo ci) {
 		if (TerrainFill.VERIFY) {
+			// With carving in Rust, the comparison waits until vanilla carved the chunk.
+			if (dev.mcrs.bridge.Carvers.ENABLED) {
+				return;
+			}
+			if (TerrainFill.surfaceInRust(noiseChunk)) {
+				TerrainFill.verify(noiseChunk, chunk, settings.value(), (ChunkGenerator) (Object) this);
+			}
+			TerrainFill.BIOME_MANAGERS.remove(chunk);
+		}
+	}
+
+	@Inject(method = "generateCarvers", at = @At("HEAD"), cancellable = true)
+	private void mcrs$skipCarvers(ChunkAccess chunk, Blender blender, NoiseChunk noiseChunk, RandomState randomState, BiomeManager biomeManager,
+			WorldGenRegion carverBiomeRegion, MaterialRule materialRule, CallbackInfo ci) {
+		dev.mcrs.bridge.StageTimes.begin(dev.mcrs.bridge.StageTimes.CARVERS);
+		if (dev.mcrs.bridge.Carvers.DONE.remove(chunk)) {
+			dev.mcrs.bridge.StageTimes.end(dev.mcrs.bridge.StageTimes.CARVERS);
+			ci.cancel();
+		}
+	}
+
+	@Inject(method = "generateCarvers", at = @At("RETURN"))
+	private void mcrs$verifyCarvers(ChunkAccess chunk, Blender blender, NoiseChunk noiseChunk, RandomState randomState, BiomeManager biomeManager,
+			WorldGenRegion carverBiomeRegion, MaterialRule materialRule, CallbackInfo ci) {
+		if (TerrainFill.VERIFY && dev.mcrs.bridge.Carvers.ENABLED) {
 			if (TerrainFill.surfaceInRust(noiseChunk)) {
 				TerrainFill.verify(noiseChunk, chunk, settings.value(), (ChunkGenerator) (Object) this);
 			}

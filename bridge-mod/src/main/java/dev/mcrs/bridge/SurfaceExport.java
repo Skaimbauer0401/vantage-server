@@ -48,6 +48,7 @@ final class SurfaceExport {
 	/** Per-state flag bits, see STATE_* in surface.rs. */
 	static final int AIR = 1, HAS_FLUID = 2, BLOCKS_MOTION = 4, WORLD_SURFACE = 8, WATER = 16, LAVA = 32;
 	static final int COUNT_NON_EMPTY = 128, COUNT_FLUID = 256, COUNT_TICKING_BLOCK = 512, COUNT_TICKING_FLUID = 1024;
+	static final int UNCARVABLE = 2048, GRASS_OR_MYCELIUM = 4096, DIRT = 8192;
 
 	private final WorldgenExport exporter;
 	private final RandomState randomState;
@@ -79,6 +80,15 @@ final class SurfaceExport {
 			}
 			if (state.is(Blocks.LAVA)) {
 				f |= LAVA;
+			}
+			if (state.is(net.minecraft.tags.BlockTags.UNCARVABLE)) {
+				f |= UNCARVABLE;
+			}
+			if (state.is(Blocks.GRASS_BLOCK) || state.is(Blocks.MYCELIUM)) {
+				f |= GRASS_OR_MYCELIUM;
+			}
+			if (state.is(Blocks.DIRT)) {
+				f |= DIRT;
 			}
 			int counts = ChunkIo.stateFlags(state);
 			f |= (counts & 1) != 0 ? COUNT_NON_EMPTY : 0;

@@ -12,7 +12,7 @@ fn main() {
     let json: serde_json::Value = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
     let generator = Generator::from_json(&json).unwrap();
     let (min_y, height) = (-64, 384);
-    let params = mcrs_worldgen::fill::FillParams { chunk_min_y: min_y, chunk_height: height, surface: None };
+    let params = mcrs_worldgen::fill::FillParams { chunk_min_y: min_y, chunk_height: height, surface: None, carving: None };
     // Warm up, then measure a 10x10 area on one thread.
     for i in 0..10 {
         generator.fill(1000 + i, 1000, min_y, height, Default::default(), &params);
@@ -48,7 +48,7 @@ fn main() {
                     sea_level: generator.sea_level,
                     noise_volume: mcrs_worldgen::noise::DensityVolume::new([16, height, 16], [cx << 4, min_y, cz << 4], [1, 1, 1]),
                 };
-                let p = mcrs_worldgen::fill::FillParams { chunk_min_y: min_y, chunk_height: height, surface: Some(input) };
+                let p = mcrs_worldgen::fill::FillParams { chunk_min_y: min_y, chunk_height: height, surface: Some(input), carving: None };
                 generator.fill(cx, cz, min_y, height, Default::default(), &p);
             }
         }
