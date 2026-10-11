@@ -21,7 +21,9 @@ players gain nothing more from the performance edition either, since its mob cha
 on mobs away from players.
 
 ## Editions
-One build, three editions, chosen with `edition` in `mcrs.toml`:
+Three separate builds (release downloads), one per edition; the edition is built in
+(`MCRS_EDITION=balanced cargo build --release`) and can still be overridden with `edition` in
+`mcrs.toml`:
 
 | `edition` | Game behavior | What changes |
 |---|---|---|
@@ -46,11 +48,13 @@ The performance edition adds:
   new wire evaluator and update order) without the data pack. Some contraptions that rely on
   today's update order can behave differently.
 
-World generation stays exact in every edition (seeds and structures match vanilla), and Fabric
-mods work in all three. An approximate terrain mode like Pumpkin's (`-Dmcrs.approxWorldgen=1..3`:
-fewer noise octaves, coarser interpolation cells; terrain roughly the same, not block for block)
-exists, but it is only 1-6% faster in a real pregeneration (the exact Rust terrain is already
-cheap; saving and scheduling dominated), so no edition turns it on.
+- **Approximate terrain, like Pumpkin**: fewer noise octaves and coarser interpolation cells.
+  Biomes and structures follow the seed as in vanilla and the terrain is roughly the same
+  (surface height equal in ~40% of columns, 1.7 blocks off on average, top block equal in
+  ~92%), but not block for block. About 6% faster generation (`-Dmcrs.approxWorldgen=0`
+  turns it off, 1-3 choose the level).
+
+Fabric mods work in all three editions; in vanilla and balanced, world generation is exact.
 
 Chunk generation: chunks are serialized and compressed in parallel instead of on vanilla's
 single chunk IO thread (byte-identical files; `-Dmcrs.parallelSave=false` turns it off), and

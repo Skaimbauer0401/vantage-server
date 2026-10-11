@@ -34,7 +34,7 @@ fn main() -> Result<()> {
     tracing::info!(
         "mcrs {} | {} edition | Minecraft {} | Fabric Loader {} | JDK {}",
         env!("CARGO_PKG_VERSION"),
-        config.edition.name(),
+        config.edition().name(),
         config.minecraft_version,
         config.fabric_loader_version,
         java_home.display()
@@ -100,6 +100,8 @@ fn aot_options(config: &Config, java_home: &Path, options: &[String]) -> Result<
 
 /// Approximation level for `-Dmcrs.approxWorldgen=true` (`mcrs_worldgen::approx`).
 const DEFAULT_APPROXIMATION: u8 = 1;
+/// The performance edition's terrain: fewer noise octaves and coarser interpolation cells.
+const PERFORMANCE_APPROXIMATION: u8 = 3;
 
 fn run_server(config: &Config, java_home: &Path) -> Result<()> {
     let mut options = vec![
@@ -114,14 +116,14 @@ fn run_server(config: &Config, java_home: &Path) -> Result<()> {
         options.push("-XX:-UseLibmIntrinsic".into());
     }
     // Before jvm_options so that they can override single switches.
-    options.push(format!("-Dmcrs.edition={}", config.edition.name()));
+    options.push(format!("-Dmcrs.edition={}", config.edition().name()));
     options.extend(config.jvm_options.iter().cloned());
     // One-off extras (profiling etc.) without editing mcrs.toml.
     if let Ok(extra) = std::env::var("MCRS_JVM_OPTIONS") {
         options.extend(extra.split_whitespace().map(String::from));
     }
-    // Approximate terrain: off unless -Dmcrs.approxWorldgen=<level> (1-3) or true; it is only a
-    // few percent faster (see README), so even the performance edition generates exactly.
+    // Approximate terrain (like Pumpkin): on in the performance edition,
+    // -Dmcrs.approxWorldgen=<level 0-3> or true/false overrides.
     let approx = options
         .iter()
         .rev()
@@ -130,7 +132,7 @@ fn run_server(config: &Config, java_home: &Path) -> Result<()> {
             "false" => 0,
             v => v.parse().unwrap_or(0),
         }))
-        .unwrap_or(0);
+        .unwrap_or(if config.edition() == config::Edition::Performance { PERFORMANCE_APPROXIMATION } else { 0 });
     mcrs_jvm::set_worldgen_approximation(approx);
     options.push(format!("-Dmcrs.approxWorldgen={approx}"));
     if approx > 0 {

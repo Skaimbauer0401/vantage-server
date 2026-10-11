@@ -13,8 +13,10 @@ pub struct Config {
     pub fabric_loader_version: String,
     pub fabric_installer_version: String,
     /// Game behavior: "vanilla" (exact vanilla), "balanced" (+ activation range) or
-    /// "performance" (further from vanilla, Paper/Pufferfish-like). See README.
-    pub edition: Edition,
+    /// "performance" (Paper/Pufferfish-like, approximate terrain). See README. Unset: the
+    /// edition this binary was built as (`MCRS_EDITION` at build time, default vanilla).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub edition: Option<Edition>,
     /// Server directory (worlds, mods, server.properties, eula.txt).
     pub run_dir: PathBuf,
     /// JDK to embed. Empty = MCRS_JAVA_HOME, JAVA_HOME, then `.tools/jdk-*`.
@@ -46,6 +48,15 @@ pub enum Edition {
 }
 
 impl Edition {
+    /// The edition this binary was built as: `MCRS_EDITION=balanced cargo build ...`.
+    pub fn built() -> Edition {
+        match option_env!("MCRS_EDITION") {
+            Some("balanced") => Edition::Balanced,
+            Some("performance") => Edition::Performance,
+            _ => Edition::Vanilla,
+        }
+    }
+
     pub fn name(self) -> &'static str {
         match self {
             Edition::Vanilla => "vanilla",
@@ -61,7 +72,7 @@ impl Default for Config {
             minecraft_version: "26.3".into(),
             fabric_loader_version: "0.19.5".into(),
             fabric_installer_version: "1.1.2".into(),
-            edition: Edition::Vanilla,
+            edition: None,
             run_dir: "run".into(),
             java_home: None,
             max_memory: "4G".into(),
@@ -75,6 +86,11 @@ impl Default for Config {
 }
 
 impl Config {
+    /// `edition` from mcrs.toml, else the built-in one.
+    pub fn edition(&self) -> Edition {
+        self.edition.unwrap_or_else(Edition::built)
+    }
+
     /// Loads `mcrs.toml` from `dir`, writing the defaults first if it doesn't exist.
     pub fn load_or_create(dir: &Path) -> Result<Config> {
         let path = dir.join(CONFIG_FILE);
