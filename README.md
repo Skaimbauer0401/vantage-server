@@ -6,19 +6,22 @@ default edition plays exactly like vanilla: every optimization is verified again
 (same terrain block for block, same mob and redstone behavior tick for tick). Two more
 editions trade some vanilla behavior for speed, like Paper and Pufferfish do.
 
-Measured on a laptop (i7-11800H), same JDK and settings, mean tick time (lower is better):
+Measured on a laptop (i7-11800H) with `tools/bench/full.sh`, one run each (differences under
+~10% are noise). "Java vanilla" is the same Fabric server with every Vantage change off.
+Factors: how much faster than Java vanilla.
 
-| | Vanilla 26.3 | Vantage `vanilla` | Vantage `balanced` | Vantage `performance` |
+| Scenario | Java vanilla | Vantage Vanilla | Vantage Balanced | Vantage Performance |
 |---|---|---|---|---|
-| 10 players flying over a world | 43.8 ms | 41.9 ms | 36.8 ms | 30.3 ms |
-| 1500 mobs next to a player | 45.8 ms | 32.2 ms | n/a | 33.6 ms |
-| 320 redstone clocks | 44.4 ms | 25.2 ms | n/a | 8.9 ms |
-| 1600 hoppers | 1.6 ms | 1.7 ms | n/a | 1.2 ms |
-| Chunk generation (Chunky, chunks/s, higher is better) | 135 | 306 | same | same |
+| Chunky pregeneration, chunks/s (higher is better) | 155.5 | 323.1 (2.08x) | 321.8 (2.07x) | 332.6 (2.14x) |
+| 10 players flying over a world, ms/tick | 43.6 | 42.8 (1.02x) | 38.6 (1.13x) | 30.1 (1.45x) |
+| 1500 mobs next to a player, ms/tick | 47.7 | 30.8 (1.55x) | 31.5 (1.51x) | 32.0 (1.49x) |
+| 1500 mobs with no player nearby (e.g. a farm), ms/tick | 43.5 | 30.2 (1.44x) | 18.5 (2.35x) | 14.8 (2.93x) |
+| 320 redstone clocks, ms/tick | 45.4 | 27.4 (1.65x) | 23.9 (1.90x) | 8.9 (5.08x) |
+| 1600 hoppers, ms/tick | 1.7 | 1.7 (1.00x) | 1.6 (1.07x) | 1.2 (1.46x) |
+| crop farm, fast random ticks, ms/tick | 1.2 | 1.2 (1.02x) | 1.1 (1.12x) | 0.9 (1.33x) |
 
-n/a: balanced only differs from `vanilla` for mobs away from players. Mobs right next to
-players gain nothing more from the performance edition either, since its mob changes only act
-on mobs away from players.
+Mobs right next to players gain nothing more from Balanced and Performance: their mob changes
+only act on mobs away from players.
 
 ## Editions
 Three separate builds (release downloads), one per edition; the edition is built in
