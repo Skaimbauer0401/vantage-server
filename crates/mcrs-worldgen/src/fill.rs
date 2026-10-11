@@ -71,6 +71,8 @@ pub struct Generator {
     /// `surface::STATE_*` flags per global block state id.
     pub state_flags: Vec<u16>,
     pub surface: Option<Surface>,
+    /// Biome lookup, when the export has the biome source's tree.
+    pub biome_tree: Option<crate::biome::BiomeTree>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -94,6 +96,14 @@ fn int(v: &Value, name: &str) -> Result<i64, LoadError> {
 impl Generator {
     pub fn from_json(json: &Value) -> Result<Generator, LoadError> {
         let graph = Graph::from_json(json)?;
+        let biome_tree = match json.get("biome_tree") {
+            Some(tree) => {
+                // Biomes stay exact: with approximate terrain they get an exact graph copy.
+                let exact = if crate::approx::level() > 0 { Some(crate::approx::with_level(0, || Graph::from_json(json))?) } else { None };
+                Some(crate::biome::BiomeTree::from_json(tree, &graph, exact)?)
+            }
+            None => None,
+        };
         let root = |name: &str| graph.root(name).ok_or_else(|| LoadError(format!("missing root {name}")));
         let final_density = root("final_density")?;
         let aquifers = get(json, "aquifers")?.as_bool().unwrap_or(false);
@@ -160,7 +170,19 @@ impl Generator {
             air: int(json, "air")? as u32,
             lava: int(json, "lava")? as u32,
             states,
+            biome_tree,
         })
+    }
+
+    /// Biome ids of a chunk (see [`crate::biome::BiomeTree::fill`]); false without a tree.
+    pub fn biomes(&self, min_x: i32, min_y: i32, min_z: i32, quarts_y: i32, out: &mut [i32]) -> bool {
+        match &self.biome_tree {
+            Some(tree) => {
+                tree.fill(&self.graph, min_x, min_y, min_z, quarts_y, out);
+                true
+            }
+            None => false,
+        }
     }
 
     fn info(&self, id: u32) -> StateInfo {

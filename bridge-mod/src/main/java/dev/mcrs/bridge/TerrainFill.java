@@ -77,10 +77,11 @@ public final class TerrainFill {
 	private TerrainFill() {
 	}
 
-	private static synchronized long handle(RandomState randomState, NoiseGeneratorSettings settings, ChunkAccess chunk) {
+	static synchronized long handle(RandomState randomState, NoiseGeneratorSettings settings, ChunkAccess chunk,
+			net.minecraft.world.level.chunk.ChunkGenerator generator) {
 		Long handle = HANDLES.get(randomState);
 		if (handle == null) {
-			var json = Worldgen.export(randomState, settings, biomeIds(chunk));
+			var json = Worldgen.export(randomState, settings, biomeIds(chunk), generator.getBiomeSource());
 			handle = json == null ? 0L : NativeBridge.wgLoad(json.toString().getBytes(StandardCharsets.UTF_8));
 			HANDLES.put(randomState, handle);
 			if (handle != 0 && json.has("surface")) {
@@ -91,7 +92,7 @@ public final class TerrainFill {
 	}
 
 	@SuppressWarnings("unchecked")
-	private static net.minecraft.core.IdMap<net.minecraft.core.Holder<net.minecraft.world.level.biome.Biome>> biomeIds(ChunkAccess chunk) {
+	static net.minecraft.core.IdMap<net.minecraft.core.Holder<net.minecraft.world.level.biome.Biome>> biomeIds(ChunkAccess chunk) {
 		Object biomes = chunk.getSection(0).getBiomes();
 		return ((PalettedContainerAccessor<net.minecraft.core.Holder<net.minecraft.world.level.biome.Biome>>) biomes).mcrs$strategy().globalMap();
 	}
@@ -102,9 +103,10 @@ public final class TerrainFill {
 	}
 
 	/** Like {@link #surfaceInRust(NoiseChunk)}, loading the dimension first if needed. */
-	public static boolean surfaceInRust(NoiseChunk noiseChunk, ChunkAccess chunk, NoiseGeneratorSettings settings) {
+	public static boolean surfaceInRust(NoiseChunk noiseChunk, ChunkAccess chunk, NoiseGeneratorSettings settings,
+			net.minecraft.world.level.chunk.ChunkGenerator generator) {
 		if (Worldgen.ENABLED && NativeBridge.isAvailable()) {
-			handle(((NoiseChunkAccessor) noiseChunk).mcrs$randomState(), settings, chunk);
+			handle(((NoiseChunkAccessor) noiseChunk).mcrs$randomState(), settings, chunk, generator);
 		}
 		return surfaceInRust(noiseChunk);
 	}
@@ -156,7 +158,7 @@ public final class TerrainFill {
 			return null;
 		}
 		RandomState randomState = ((NoiseChunkAccessor) noiseChunk).mcrs$randomState();
-		long handle = handle(randomState, settings, chunk);
+		long handle = handle(randomState, settings, chunk, generator);
 		if (handle == 0) {
 			return null;
 		}

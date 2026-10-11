@@ -10,3 +10,4 @@ pub mod noise;
 pub mod random;
 pub mod surface;
 pub mod approx;
+pub mod biome;

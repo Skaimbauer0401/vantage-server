@@ -51,6 +51,28 @@ pub extern "C" fn wg_load(json: *const u8, len: usize) -> i64 {
     result.unwrap_or(0)
 }
 
+/// `int wg_biomes(long handle, int minX, int minY, int minZ, int quartsY, int* out, size_t len)`:
+/// biome ids of one chunk, index `(quartY * 4 + quartZ) * 4 + quartX`. 1 = done, 0 = the
+/// generator has no biome tree (Java uses vanilla).
+pub extern "C" fn wg_biomes(handle: i64, min_x: i32, min_y: i32, min_z: i32, quarts_y: i32, out: *mut i32, len: usize) -> i32 {
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        let generator = match usize::try_from(handle - 1).ok().and_then(|i| GENERATORS.read().unwrap().get(i).cloned()) {
+            Some(g) => g,
+            None => return 0,
+        };
+        if len != 16 * quarts_y.max(0) as usize {
+            return 0;
+        }
+        let out = unsafe { std::slice::from_raw_parts_mut(out, len) };
+        if generator.biomes(min_x, min_y, min_z, quarts_y, out) {
+            1
+        } else {
+            0
+        }
+    }));
+    result.unwrap_or(0)
+}
+
 /// Decodes the Java side's beardifier ints: `hasBox, box[6], pieceCount,
 /// pieces[8 each: min xyz, max xyz, adjustment, groundLevelDelta], junctionCount, junctions[3 each]`.
 fn parse_beard(ints: &[i32]) -> Option<Beard> {

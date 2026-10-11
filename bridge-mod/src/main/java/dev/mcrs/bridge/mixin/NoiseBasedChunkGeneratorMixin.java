@@ -54,7 +54,7 @@ public abstract class NoiseBasedChunkGeneratorMixin {
 
 	@Inject(method = "doFill", at = @At("RETURN"))
 	private void mcrs$verifyFill(NoiseChunk noiseChunk, ChunkAccess chunk, CallbackInfo ci) {
-		if (TerrainFill.VERIFY && !TerrainFill.surfaceInRust(noiseChunk, chunk, settings.value())) {
+		if (TerrainFill.VERIFY && !TerrainFill.surfaceInRust(noiseChunk, chunk, settings.value(), (ChunkGenerator) (Object) this)) {
 			TerrainFill.verify(noiseChunk, chunk, settings.value(), (ChunkGenerator) (Object) this);
 		}
 	}

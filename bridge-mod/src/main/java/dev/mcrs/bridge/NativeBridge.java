@@ -14,11 +14,11 @@ import java.nio.charset.StandardCharsets;
  * is bound as a Panama FFM downcall. Keep the layout in sync with the Rust struct.
  */
 public final class NativeBridge {
-	public static final int ABI_VERSION = 6;
+	public static final int ABI_VERSION = 7;
 
 	private static final String MAGIC = "MCRSBRDG";
 	private static final long HEADER_SIZE = 16;
-	private static final int FN_COUNT = 7;
+	private static final int FN_COUNT = 8;
 
 	public static final int TRACE = 0, DEBUG = 1, INFO = 2, WARN = 3, ERROR = 4;
 
@@ -29,6 +29,7 @@ public final class NativeBridge {
 	private static MethodHandle freeBuffer;
 	private static MethodHandle wgLoad;
 	private static MethodHandle wgFill;
+	private static MethodHandle wgBiomes;
 
 	private NativeBridge() {
 	}
@@ -69,6 +70,8 @@ public final class NativeBridge {
 		wgFill = linker.downcallHandle(fn(table, 6), FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_LONG,
 				ValueLayout.JAVA_INT, ValueLayout.JAVA_INT, ValueLayout.JAVA_INT, ValueLayout.JAVA_INT, ValueLayout.ADDRESS,
 				ValueLayout.JAVA_LONG, ValueLayout.ADDRESS, ValueLayout.JAVA_LONG, ValueLayout.ADDRESS, ValueLayout.ADDRESS));
+		wgBiomes = linker.downcallHandle(fn(table, 7), FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_LONG,
+				ValueLayout.JAVA_INT, ValueLayout.JAVA_INT, ValueLayout.JAVA_INT, ValueLayout.JAVA_INT, ValueLayout.ADDRESS, ValueLayout.JAVA_LONG));
 		return true;
 	}
 
@@ -169,6 +172,21 @@ public final class NativeBridge {
 				return null;
 			}
 			return out.get(ValueLayout.ADDRESS, 0).reinterpret(outLen.get(ValueLayout.JAVA_LONG, 0));
+		} catch (Throwable t) {
+			throw new RuntimeException(t);
+		}
+	}
+
+	/**
+	 * Biome ids of a chunk from Rust, index {@code (quartY * 4 + quartZ) * 4 + quartX}, or null if
+	 * Rust can't (no biome tree for this generator).
+	 */
+	public static int[] wgBiomes(long handle, int minX, int minY, int minZ, int quartsY) {
+		try (Arena arena = Arena.ofConfined()) {
+			int count = 16 * quartsY;
+			MemorySegment out = arena.allocate(ValueLayout.JAVA_INT, count);
+			int result = (int) wgBiomes.invokeExact(handle, minX, minY, minZ, quartsY, out, (long) count);
+			return result == 1 ? out.toArray(ValueLayout.JAVA_INT) : null;
 		} catch (Throwable t) {
 			throw new RuntimeException(t);
 		}

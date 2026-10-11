@@ -37,13 +37,14 @@ public final class Worldgen {
 	}
 
 	public static synchronized JsonObject export(RandomState randomState, NoiseGeneratorSettings settings,
-			net.minecraft.core.IdMap<net.minecraft.core.Holder<net.minecraft.world.level.biome.Biome>> biomeIds) {
+			net.minecraft.core.IdMap<net.minecraft.core.Holder<net.minecraft.world.level.biome.Biome>> biomeIds,
+			net.minecraft.world.level.biome.BiomeSource biomeSource) {
 		if (EXPORTS.containsKey(randomState)) {
 			return EXPORTS.get(randomState);
 		}
 		JsonObject json = null;
 		try {
-			json = build(randomState, settings, biomeIds);
+			json = build(randomState, settings, biomeIds, biomeSource);
 			if (DUMP) {
 				Path file = Path.of("mcrs-worldgen-" + EXPORTS.size() + ".json");
 				Files.writeString(file, json.toString());
@@ -59,9 +60,18 @@ public final class Worldgen {
 	}
 
 	private static JsonObject build(RandomState randomState, NoiseGeneratorSettings settings,
-			net.minecraft.core.IdMap<net.minecraft.core.Holder<net.minecraft.world.level.biome.Biome>> biomeIds) {
+			net.minecraft.core.IdMap<net.minecraft.core.Holder<net.minecraft.world.level.biome.Biome>> biomeIds,
+			net.minecraft.world.level.biome.BiomeSource biomeSource) {
 		Map<String, DensitySampler> roots = new LinkedHashMap<>();
 		roots.put("final_density", randomState.getSampler(settings.noiseRouter().finalDensity()));
+		// Climate.Sampler of NoiseRouter.createClimateSampler, for biomes.
+		var router = settings.noiseRouter();
+		roots.put("climate_temperature", randomState.getSampler(router.temperature()));
+		roots.put("climate_humidity", randomState.getSampler(router.vegetation()));
+		roots.put("climate_continentalness", randomState.getSampler(router.continents()));
+		roots.put("climate_erosion", randomState.getSampler(router.erosion()));
+		roots.put("climate_depth", randomState.getSampler(router.depth()));
+		roots.put("climate_weirdness", randomState.getSampler(router.ridges()));
 		settings.aquifers().ifPresent(aquifer -> {
 			roots.put("barrier", randomState.getSampler(aquifer.barrierNoise()));
 			roots.put("fluid_level_floodedness", randomState.getSampler(aquifer.fluidLevelFloodednessNoise()));
@@ -91,6 +101,13 @@ public final class Worldgen {
 		json.add("states", states);
 		json.add("beard_kernel", beardKernel());
 		json.add("state_flags", SurfaceExport.stateFlags(Block.BLOCK_STATE_REGISTRY));
+		if (Biomes.ENABLED && biomeSource instanceof net.minecraft.world.level.biome.MultiNoiseBiomeSource multiNoise) {
+			try {
+				json.add("biome_tree", Biomes.exportTree(multiNoise, biomeIds));
+			} catch (ReflectiveOperationException | RuntimeException e) {
+				McrsBridge.LOGGER.warn("mcrs: biomes stay on vanilla for this dimension: {}", e.toString());
+			}
+		}
 		if (SURFACE) {
 			try {
 				json.add("surface", new SurfaceExport(exporter, randomState).surface(settings, biomeIds));

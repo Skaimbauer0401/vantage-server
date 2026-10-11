@@ -9,7 +9,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 pub const MAGIC: u64 = u64::from_le_bytes(*b"MCRSBRDG");
-pub const ABI_VERSION: u32 = 6;
+pub const ABI_VERSION: u32 = 7;
 
 #[repr(C)]
 pub struct BridgeTable {
@@ -30,12 +30,14 @@ pub struct BridgeTable {
     pub wg_load: extern "C" fn(*const u8, usize) -> i64,
     /// See [`crate::worldgen::wg_fill`].
     pub wg_fill: extern "C" fn(i64, i32, i32, i32, i32, *const i32, usize, *const i32, usize, *mut *mut u8, *mut usize) -> i32,
+    /// See [`crate::worldgen::wg_biomes`].
+    pub wg_biomes: extern "C" fn(i64, i32, i32, i32, i32, *mut i32, usize) -> i32,
 }
 
 pub static BRIDGE: BridgeTable = BridgeTable {
     magic: MAGIC,
     abi_version: ABI_VERSION,
-    fn_count: 7,
+    fn_count: 8,
     log: bridge_log,
     on_tick: bridge_on_tick,
     set_registry: crate::chunk_io::set_registry,
@@ -43,6 +45,7 @@ pub static BRIDGE: BridgeTable = BridgeTable {
     free_buffer: crate::chunk_io::free_buffer,
     wg_load: crate::worldgen::wg_load,
     wg_fill: crate::worldgen::wg_fill,
+    wg_biomes: crate::worldgen::wg_biomes,
 };
 
 /// Address passed to Java as `-Dmcrs.bridge=<address>`.
