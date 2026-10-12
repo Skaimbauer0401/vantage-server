@@ -1,6 +1,10 @@
 #!/usr/bin/env sh
-# Full comparison: Java vanilla vs Vantage Vanilla, Balanced and Performance, every scenario.
-#   tools/bench/full.sh [ticks] [chunky seconds]     (defaults 600 ticks, 60 s; about an hour)
+# Full comparison: Java vanilla, Java vanilla with the usual Fabric performance mods, and
+# Vantage Vanilla, Balanced and Performance, every scenario.
+#   tools/bench/full.sh [ticks] [chunky seconds] [performance mods dir]
+# (defaults 600 ticks, 60 s; about 80 minutes). The mods dir holds Lithium, C2ME, ScalableLux,
+# FerriteCore and Krypton jars for the "Java vanilla + performance mods" column; without it
+# that column is skipped.
 # "Java vanilla" is the same Fabric server with every Vantage change switched off, so all
 # runs share the JDK, Fabric and settings. Results: target/full-results.md (mean tick time in
 # ms, lower is better; Chunky in chunks/s, higher is better).
@@ -8,10 +12,13 @@ set -u
 cd "$(dirname "$0")/../.."
 T=${1:-600}
 CS=${2:-60}
+MODS_DIR=${3:-}
 JAVA="-Dmcrs.chunkio=false -Dmcrs.fastBlocks=false -Dmcrs.fastEntities=false -Dmcrs.fastLight=false -Dmcrs.fastOres=false -Dmcrs.parallelFeatures=false -Dmcrs.worldgen=false -Dmcrs.parallelSave=false -Dmcrs.edition=vanilla -Dmcrs.approxWorldgen=0"
 VAN="-Dmcrs.edition=vanilla -Dmcrs.approxWorldgen=0"
 BAL="-Dmcrs.edition=balanced -Dmcrs.approxWorldgen=0"
 PERF="-Dmcrs.edition=performance -Dmcrs.approxWorldgen=3"
+VARIANTS="java van bal perf"
+[ -n "$MODS_DIR" ] && VARIANTS="java mods van bal perf"
 OUT=target/full-results.md
 RAW=target/full-raw.txt
 : > "$RAW"
@@ -21,8 +28,10 @@ bots_mean() { clean "$1" | grep -a '\[bots\]' | grep -ao 'ticks, mean [0-9.]*' |
 chunky_rate() { clean "$1" | grep -ao 'Rate: [0-9,.]* cps' | tail -1 | grep -o '[0-9,.]*' | tr ',' '.'; }
 record() { echo "$1|$2|${3:-failed}" | tee -a "$RAW"; }
 
-for v in java van bal perf; do
-  case $v in java) O=$JAVA ;; van) O=$VAN ;; bal) O=$BAL ;; perf) O=$PERF ;; esac
+for v in $VARIANTS; do
+  unset EXTRA_MODS
+  case $v in java) O=$JAVA ;; mods) O=$JAVA; EXTRA_MODS="$(ls "$MODS_DIR"/*.jar | tr '
+' ' ')"; export EXTRA_MODS ;; van) O=$VAN ;; bal) O=$BAL ;; perf) O=$PERF ;; esac
   sh tools/bench/chunky.sh "$O" "full-$v" "$CS" >/dev/null 2>&1
   record chunky "$v" "$(chunky_rate target/chunky-server/chunky-full-$v.log)"
   sh tools/bench/bots.sh 10 0.5 "$T" "$O" "full-$v" >/dev/null 2>&1
@@ -35,6 +44,8 @@ for v in java van bal perf; do
   record redstone "$v" "$(harness_mean target/tick-server/tick-full-red-$v.log)"
   sh tools/bench/tick.sh hoppers 1600 "$T" false "$O" "full-hop-$v" >/dev/null 2>&1
   record hoppers "$v" "$(harness_mean target/tick-server/tick-full-hop-$v.log)"
+  sh tools/bench/tick.sh tradinghall 1000 "$T" false "$O -Dmcrs.harness.watcher=true" "full-trade-$v" >/dev/null 2>&1
+  record tradinghall "$v" "$(harness_mean target/tick-server/tick-full-trade-$v.log)"
   sh tools/bench/tick.sh farm 20 "$T" false "$O" "full-farm-$v" >/dev/null 2>&1
   record farm "$v" "$(harness_mean target/tick-server/tick-full-farm-$v.log)"
 done
@@ -53,10 +64,12 @@ rows = [
     ("mobs-far", "1500 mobs with no player nearby (e.g. a farm), ms/tick", False),
     ("redstone", "320 redstone clocks, ms/tick", False),
     ("hoppers", "1600 hoppers, ms/tick", False),
+    ("tradinghall", "trading hall, 1000 boxed villagers, ms/tick", False),
     ("farm", "crop farm, fast random ticks, ms/tick", False),
 ]
-cols = ["java", "van", "bal", "perf"]
-lines = ["| Scenario | Java vanilla | Vantage Vanilla | Vantage Balanced | Vantage Performance |", "|---|---|---|---|---|"]
+cols = [c for c in ["java", "mods", "van", "bal", "perf"] if any(k[1] == c for k in data)]
+titles = {"java": "Java vanilla", "mods": "Java vanilla + performance mods", "van": "Vantage Vanilla", "bal": "Vantage Balanced", "perf": "Vantage Performance"}
+lines = ["| Scenario | " + " | ".join(titles[c] for c in cols) + " |", "|---" * (len(cols) + 1) + "|"]
 for key, name, higher in rows:
     base = data.get((key, "java"), "failed")
     cells = []

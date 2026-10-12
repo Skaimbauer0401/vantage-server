@@ -17,6 +17,10 @@ view-distance=10
 simulation-distance=10
 PROPS
 [ -f "$DIR/eula.txt" ] || cp run/eula.txt "$DIR/eula.txt"
+# EXTRA_MODS="a.jar b.jar": extra mods for this run (other mods are removed).
+mkdir -p "$DIR/mods"
+find "$DIR/mods" -name "*.jar" ! -name "mcrs-bridge-*" -delete
+for m in ${EXTRA_MODS:-}; do cp "$m" "$DIR/mods/"; done
 LOG="$DIR/bots-$5.log"
 WAIT=${6:-$(( $3 / 20 + 40 ))}
 ( sleep 25

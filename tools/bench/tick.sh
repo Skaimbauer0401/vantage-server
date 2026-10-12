@@ -17,6 +17,10 @@ online-mode=false
 spawn-protection=0
 PROPS
 [ -f "$DIR/eula.txt" ] || cp run/eula.txt "$DIR/eula.txt"
+# EXTRA_MODS="a.jar b.jar": extra mods for this run (other mods are removed).
+mkdir -p "$DIR/mods"
+find "$DIR/mods" -name "*.jar" ! -name "mcrs-bridge-*" -delete
+for m in ${EXTRA_MODS:-}; do cp "$m" "$DIR/mods/"; done
 LOG="$DIR/tick-$6.log"
 WAIT=${7:-$(( $3 / 20 + 30 ))}
 ( sleep 20

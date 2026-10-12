@@ -118,6 +118,12 @@ public final class Benchmarks {
 														.executes(c -> entities(c.getSource(), IdentifierArgument.getId(c, "type").toString(),
 																IntegerArgumentType.getInteger(c, "count"),
 																IntegerArgumentType.getInteger(c, "seconds"))))))))
+				.then(Commands.literal("mem").executes(c -> {
+					System.gc();
+					Runtime rt = Runtime.getRuntime();
+					report(c.getSource(), String.format(Locale.ROOT, "[mem] heap used after GC: %.0f MB", (rt.totalMemory() - rt.freeMemory()) / 1e6));
+					return 1;
+				}))
 				.then(Commands.literal("compresstest").executes(c -> {
 					report(c.getSource(), NativeCompression.selfTest());
 					return 1;
