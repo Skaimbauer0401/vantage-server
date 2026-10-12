@@ -47,7 +47,7 @@ public final class ChunkIo {
 	private static final int FLAG_TICKING_BLOCK = 2;
 	private static final int FLAG_FLUID = 4;
 	private static final int FLAG_TICKING_FLUID = 8;
-	public static final boolean ENABLED = !"false".equals(System.getProperty("mcrs.chunkio"));
+	public static final boolean ENABLED = !"false".equals(System.getProperty("mcrs.chunkio")) && !McrsMixinPlugin.otherChunkSystem();
 	public static final boolean VERIFY = Boolean.getBoolean("mcrs.chunkio.verify");
 
 	/** Rust {@code read_chunk} flag: keep the original palette for verification. */

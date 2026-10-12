@@ -358,6 +358,20 @@ public final class TickHarness {
 					command(server, s, String.format(Locale.ROOT, "setblock %d %d %d minecraft:redstone_lamp", x, y, z + 15));
 				}
 			}
+			case "tradinghall" -> {
+				// Villagers boxed into 1x1 cells with a lectern each, as in trading halls.
+				if (size > 1600) {
+					return "tradinghall size is at most 1600";
+				}
+				for (int i = 0; i < size; i++) {
+					int x = -60 + (i % 40) * 3;
+					int z = -60 + (i / 40) * 3;
+					command(server, s, String.format(Locale.ROOT, "fill %d %d %d %d %d %d minecraft:stone", x - 1, y, z - 1, x + 1, y + 2, z + 1));
+					command(server, s, String.format(Locale.ROOT, "fill %d %d %d %d %d %d minecraft:air", x, y, z, x, y + 1, z));
+					command(server, s, String.format(Locale.ROOT, "setblock %d %d %d minecraft:lectern", x + 1, y, z));
+					command(server, s, String.format(Locale.ROOT, "summon minecraft:villager %d %d %d {PersistenceRequired:1b}", x, y, z));
+				}
+			}
 			case "hoppers" -> {
 				// Hoppers as in bases: a quarter move items from a full chest into a chest below,
 				// the rest wait idle under air or under an empty chest.
@@ -383,7 +397,7 @@ public final class TickHarness {
 				}
 			}
 			default -> {
-				return "unknown scenario " + scenario + " (mobs, redstone, farm, hoppers)";
+				return "unknown scenario " + scenario + " (mobs, redstone, farm, hoppers, tradinghall)";
 			}
 		}
 		return null;

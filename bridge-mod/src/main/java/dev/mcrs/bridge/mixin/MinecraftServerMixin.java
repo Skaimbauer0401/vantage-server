@@ -30,6 +30,7 @@ public abstract class MinecraftServerMixin {
 			NativeBridge.onTick(nanos);
 		}
 		Benchmarks.onTick(nanos);
+		dev.mcrs.bridge.ServerTuning.onTick((MinecraftServer) (Object) this, nanos);
 	}
 
 	/**

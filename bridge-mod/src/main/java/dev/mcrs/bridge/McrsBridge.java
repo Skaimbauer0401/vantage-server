@@ -15,8 +15,9 @@ public class McrsBridge implements ModInitializer {
 		}
 		NativeBridge.log(NativeBridge.INFO, "bridge online (ABI " + NativeBridge.ABI_VERSION + ")");
 		NativeBridge.log(NativeBridge.INFO, String.format(java.util.Locale.ROOT,
-				"%s edition: activation range %s, brain throttle %s, collision limit %s, spawn rate %s, idle hoppers %s, redstone experiments %s", Edition.CURRENT.name().toLowerCase(java.util.Locale.ROOT),
-				onOff(ActivationRange.ENABLED), onOff(BrainThrottle.ENABLED), onOff(Collisions.ENABLED), onOff(SpawnRate.ENABLED), onOff(Hoppers.ENABLED), onOff(Redstone.EXPERIMENTS)));
+				"%s edition: activation range %s, brain throttle %s, collision limit %s, spawn rate %s, idle hoppers %s, redstone experiments %s, dynamic distance %s, villager lobotomy %s, breeding cap %s, merge radius %s", Edition.CURRENT.name().toLowerCase(java.util.Locale.ROOT),
+				onOff(ActivationRange.ENABLED), onOff(BrainThrottle.ENABLED), onOff(Collisions.ENABLED), onOff(SpawnRate.ENABLED), onOff(Hoppers.ENABLED), onOff(Redstone.EXPERIMENTS), onOff(ServerTuning.DYNAMIC_DISTANCE),
+				onOff(ServerTuning.VILLAGER_LOBOTOMY), onOff(ServerTuning.BREEDING_CAP), onOff(ServerTuning.MERGE_RADIUS)));
 	}
 
 	private static String onOff(boolean on) {

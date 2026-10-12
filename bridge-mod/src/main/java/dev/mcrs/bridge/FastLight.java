@@ -8,7 +8,7 @@ import java.util.concurrent.atomic.AtomicLong;
  * checks every cached lookup against vanilla's own call.
  */
 public final class FastLight {
-	public static final boolean ENABLED = !"false".equals(System.getProperty("mcrs.fastLight"));
+	public static final boolean ENABLED = !"false".equals(System.getProperty("mcrs.fastLight")) && !McrsMixinPlugin.otherLightEngine();
 	public static final boolean VERIFY = Boolean.getBoolean("mcrs.fastLight.verify");
 	public static final AtomicLong CHECKED = new AtomicLong();
 	public static final AtomicLong MISMATCHED = new AtomicLong();

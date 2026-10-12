@@ -32,7 +32,7 @@ import net.minecraft.world.level.ChunkPos;
  * <p>{@code -Dmcrs.parallelFeatures=false} restores vanilla's serial behavior.
  */
 public final class ParallelFeatures {
-	public static final boolean ENABLED = !"false".equals(System.getProperty("mcrs.parallelFeatures"));
+	public static final boolean ENABLED = !"false".equals(System.getProperty("mcrs.parallelFeatures")) && !McrsMixinPlugin.otherChunkSystem();
 
 	/** Set while the original (vanilla) step body runs on this thread. */
 	public static final ThreadLocal<Boolean> BYPASS = ThreadLocal.withInitial(() -> false);

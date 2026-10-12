@@ -23,7 +23,7 @@ import net.minecraft.world.level.chunk.storage.RegionFileVersion;
  * also encodes every chunk the vanilla way on the IO thread and compares.
  */
 public final class ParallelSave {
-	public static final boolean ENABLED = !"false".equals(System.getProperty("mcrs.parallelSave"));
+	public static final boolean ENABLED = !"false".equals(System.getProperty("mcrs.parallelSave")) && !McrsMixinPlugin.otherChunkSystem();
 	public static final boolean VERIFY = Boolean.getBoolean("mcrs.parallelSave.verify");
 	public static final AtomicLong USED = new AtomicLong();
 	public static final AtomicLong VERIFIED = new AtomicLong();

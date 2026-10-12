@@ -1,8 +1,10 @@
 {
 	"required": true,
 	"package": "dev.mcrs.bridge.mixin",
+	"plugin": "dev.mcrs.bridge.McrsMixinPlugin",
 	"compatibilityLevel": "JAVA_25",
 	"server": [
+		"AnimalBreedingCapMixin",
 		"BiomeManagerCacheMixin",
 		"BlockCollisionsMixin",
 		"BrainThrottleMixin",
@@ -18,6 +20,7 @@
 		"ConsecutiveExecutorStatsMixin",
 		"EntityManagerAccessor",
 		"EntityGridMixin",
+		"ExperienceMergeRadiusMixin",
 		"EntitySectionLookupMixin",
 		"EntitySectionMixin",
 		"PoiManagerColumnsMixin",
@@ -40,6 +43,7 @@
 		"LevelRandomAccessor",
 		"LightEngineAccessor",
 		"LightEngineMixin",
+		"MergeRadiusMixin",
 		"MinecraftServerMixin",
 		"MinecraftServerRandomAccessor",
 		"MobBrainThrottleMixin",
@@ -72,6 +76,7 @@
 		"SkyLightSourcesMixin",
 		"StructureTemplatePaletteMixin",
 		"TrackedEntityMixin",
+		"VillagerLobotomyMixin",
 		"WorldGenRegionAccessor",
 		"ThreadedLevelLightEngineMixin"
 	],
