@@ -17,6 +17,7 @@
 		"ChunkStatusBlockCacheMixin",
 		"ChunkStatusTasksMixin",
 		"CommandsMixin",
+		"CompressionEncoderMixin",
 		"ConsecutiveExecutorStatsMixin",
 		"EntityManagerAccessor",
 		"EntityGridMixin",

@@ -5,6 +5,7 @@
 
 pub mod bridge;
 mod chunk_io;
+mod compress;
 mod worldgen;
 
 use std::ffi::{c_void, CString};

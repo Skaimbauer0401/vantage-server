@@ -12,3 +12,4 @@ thiserror = "2"
 
 [dev-dependencies]
 rayon = "1"
+libdeflater = "1"

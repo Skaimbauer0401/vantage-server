@@ -9,7 +9,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 pub const MAGIC: u64 = u64::from_le_bytes(*b"MCRSBRDG");
-pub const ABI_VERSION: u32 = 7;
+pub const ABI_VERSION: u32 = 8;
 
 #[repr(C)]
 pub struct BridgeTable {
@@ -32,12 +32,16 @@ pub struct BridgeTable {
     pub wg_fill: extern "C" fn(i64, i32, i32, i32, i32, *const i32, usize, *const i32, usize, *mut *mut u8, *mut usize) -> i32,
     /// See [`crate::worldgen::wg_biomes`].
     pub wg_biomes: extern "C" fn(i64, i32, i32, i32, i32, *mut i32, usize) -> i32,
+    /// See [`crate::compress::zlib_compress`].
+    pub zlib_compress: extern "C" fn(i32, *const u8, usize, *mut u8, usize) -> i64,
+    /// See [`crate::compress::zlib_bound`].
+    pub zlib_bound: extern "C" fn(usize) -> usize,
 }
 
 pub static BRIDGE: BridgeTable = BridgeTable {
     magic: MAGIC,
     abi_version: ABI_VERSION,
-    fn_count: 8,
+    fn_count: 10,
     log: bridge_log,
     on_tick: bridge_on_tick,
     set_registry: crate::chunk_io::set_registry,
@@ -46,6 +50,8 @@ pub static BRIDGE: BridgeTable = BridgeTable {
     wg_load: crate::worldgen::wg_load,
     wg_fill: crate::worldgen::wg_fill,
     wg_biomes: crate::worldgen::wg_biomes,
+    zlib_compress: crate::compress::zlib_compress,
+    zlib_bound: crate::compress::zlib_bound,
 };
 
 /// Address passed to Java as `-Dmcrs.bridge=<address>`.

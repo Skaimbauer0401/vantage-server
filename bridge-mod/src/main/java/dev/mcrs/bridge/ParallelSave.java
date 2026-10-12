@@ -52,11 +52,30 @@ public final class ParallelSave {
 
 	/** The bytes of {@code RegionFile.ChunkBuffer} after closing: length, version id, compressed NBT. */
 	public static Encoded encode(CompoundTag tag, RegionFileVersion version) throws IOException {
+		if (NativeCompression.REGION && version == RegionFileVersion.VERSION_DEFLATE && NativeCompression.available()) {
+			return encodeNative(tag, version);
+		}
 		Buffer buffer = new Buffer(version);
 		try (DataOutputStream output = new DataOutputStream(version.wrap(buffer))) {
 			NbtIo.write(tag, output);
 		}
 		return new Encoded(version, buffer.result, buffer.length);
+	}
+
+	/** Like {@link #encode(CompoundTag, RegionFileVersion)} for zlib, compressed with libdeflate. */
+	private static Encoded encodeNative(CompoundTag tag, RegionFileVersion version) throws IOException {
+		ByteArrayOutputStream raw = new ByteArrayOutputStream(1 << 16);
+		try (DataOutputStream output = new DataOutputStream(raw)) {
+			NbtIo.write(tag, output);
+		}
+		byte[] input = raw.toByteArray();
+		byte[] out = new byte[5 + NativeBridge.zlibBound(input.length)];
+		int written = NativeBridge.zlibCompress(NativeCompression.LEVEL, input, 0, input.length, out, 5);
+		if (written < 0) {
+			throw new IOException("native compression failed");
+		}
+		ByteBuffer.wrap(out).putInt(0, written + 1).put(4, (byte) version.getId());
+		return new Encoded(version, out, 5 + written);
 	}
 
 	/** The encoding of exactly this tag for this region file version, if made; removes it. */

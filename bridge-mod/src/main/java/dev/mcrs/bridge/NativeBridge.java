@@ -14,11 +14,11 @@ import java.nio.charset.StandardCharsets;
  * is bound as a Panama FFM downcall. Keep the layout in sync with the Rust struct.
  */
 public final class NativeBridge {
-	public static final int ABI_VERSION = 7;
+	public static final int ABI_VERSION = 8;
 
 	private static final String MAGIC = "MCRSBRDG";
 	private static final long HEADER_SIZE = 16;
-	private static final int FN_COUNT = 8;
+	private static final int FN_COUNT = 10;
 
 	public static final int TRACE = 0, DEBUG = 1, INFO = 2, WARN = 3, ERROR = 4;
 
@@ -30,6 +30,8 @@ public final class NativeBridge {
 	private static MethodHandle wgLoad;
 	private static MethodHandle wgFill;
 	private static MethodHandle wgBiomes;
+	private static MethodHandle zlibCompress;
+	private static MethodHandle zlibBound;
 
 	private NativeBridge() {
 	}
@@ -72,6 +74,10 @@ public final class NativeBridge {
 				ValueLayout.JAVA_LONG, ValueLayout.ADDRESS, ValueLayout.JAVA_LONG, ValueLayout.ADDRESS, ValueLayout.ADDRESS));
 		wgBiomes = linker.downcallHandle(fn(table, 7), FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_LONG,
 				ValueLayout.JAVA_INT, ValueLayout.JAVA_INT, ValueLayout.JAVA_INT, ValueLayout.JAVA_INT, ValueLayout.ADDRESS, ValueLayout.JAVA_LONG));
+		// Critical with heap access: Java arrays go to Rust without copying.
+		zlibCompress = linker.downcallHandle(fn(table, 8), FunctionDescriptor.of(ValueLayout.JAVA_LONG, ValueLayout.JAVA_INT, ValueLayout.ADDRESS,
+				ValueLayout.JAVA_LONG, ValueLayout.ADDRESS, ValueLayout.JAVA_LONG), Linker.Option.critical(true));
+		zlibBound = linker.downcallHandle(fn(table, 9), FunctionDescriptor.of(ValueLayout.JAVA_LONG, ValueLayout.JAVA_LONG), Linker.Option.critical(false));
 		return true;
 	}
 
@@ -187,6 +193,24 @@ public final class NativeBridge {
 			MemorySegment out = arena.allocate(ValueLayout.JAVA_INT, count);
 			int result = (int) wgBiomes.invokeExact(handle, minX, minY, minZ, quartsY, out, (long) count);
 			return result == 1 ? out.toArray(ValueLayout.JAVA_INT) : null;
+		} catch (Throwable t) {
+			throw new RuntimeException(t);
+		}
+	}
+
+	/** zlib stream of {@code in[inOff, inOff + inLen)} into {@code out} from {@code outOff}; bytes written, -1 if too small. */
+	public static int zlibCompress(int level, byte[] in, int inOff, int inLen, byte[] out, int outOff) {
+		try {
+			return (int) (long) zlibCompress.invokeExact(level, MemorySegment.ofArray(in).asSlice(inOff, inLen), (long) inLen,
+					MemorySegment.ofArray(out).asSlice(outOff), (long) (out.length - outOff));
+		} catch (Throwable t) {
+			throw new RuntimeException(t);
+		}
+	}
+
+	public static int zlibBound(int length) {
+		try {
+			return (int) (long) zlibBound.invokeExact((long) length);
 		} catch (Throwable t) {
 			throw new RuntimeException(t);
 		}

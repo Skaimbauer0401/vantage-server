@@ -22,7 +22,7 @@ PROPS
 [ -f "$DIR/eula.txt" ] || cp run/eula.txt "$DIR/eula.txt"
 LOG="$DIR/chunky-$2.log"
 ( sleep 25
-  echo "chunky center 0 0"; echo "chunky radius 1500"; echo "chunky start"; sleep 1; echo "chunky confirm"; sleep 19
+  echo "mcrs compresstest"; echo "chunky center 0 0"; echo "chunky radius 1500"; echo "chunky start"; sleep 1; echo "chunky confirm"; sleep 19
   echo "chunky progress"; echo "mcrs genstats"; sleep "$SECS"
   echo "chunky progress"; echo "mcrs genstats"; sleep 2
   echo "chunky cancel"; sleep 1; echo "chunky confirm"; sleep 3; echo stop; sleep 30 ) | MCRS_RUN_DIR="$DIR" MCRS_AOT_CACHE=0 MCRS_JVM_OPTIONS="$1" ./target/release/mcrs > "$LOG" 2>&1

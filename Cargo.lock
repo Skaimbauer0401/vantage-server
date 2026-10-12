@@ -413,6 +413,24 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ce5d3ddc6d3fa000eb1536d85e147bfe31aacaba692ed6a876f95cb7c855be78"
 
 [[package]]
+name = "libdeflate-sys"
+version = "1.26.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d7870e5fbd2766179a937c725fb11f4ca0ef025d982beb61bd3ce755425bd19c"
+dependencies = [
+ "cc",
+]
+
+[[package]]
+name = "libdeflater"
+version = "1.26.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0cbb8285d2e2bd4b8d4155840ae81929354b4ba0d7b3c272c84761ffa2141e1f"
+dependencies = [
+ "libdeflate-sys",
+]
+
+[[package]]
 name = "libloading"
 version = "0.8.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -467,6 +485,7 @@ name = "mcrs-chunk"
 version = "0.3.0"
 dependencies = [
  "flate2",
+ "libdeflater",
  "lz4_flex",
  "rayon",
  "thiserror 2.0.21",
@@ -478,6 +497,7 @@ version = "0.3.0"
 dependencies = [
  "anyhow",
  "jni",
+ "libdeflater",
  "libloading",
  "mcrs-chunk",
  "mcrs-worldgen",

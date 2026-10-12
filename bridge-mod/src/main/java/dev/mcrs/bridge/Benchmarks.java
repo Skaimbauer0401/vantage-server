@@ -118,6 +118,10 @@ public final class Benchmarks {
 														.executes(c -> entities(c.getSource(), IdentifierArgument.getId(c, "type").toString(),
 																IntegerArgumentType.getInteger(c, "count"),
 																IntegerArgumentType.getInteger(c, "seconds"))))))))
+				.then(Commands.literal("compresstest").executes(c -> {
+					report(c.getSource(), NativeCompression.selfTest());
+					return 1;
+				}))
 				.then(Commands.literal("genstats").executes(c -> {
 					report(c.getSource(), GenStats.report());
 					return 1;
