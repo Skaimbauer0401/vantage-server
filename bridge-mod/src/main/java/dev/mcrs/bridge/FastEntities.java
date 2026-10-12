@@ -1,5 +1,7 @@
 package dev.mcrs.bridge;
 
+import java.util.Optional;
+
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.phys.AABB;
@@ -19,6 +21,12 @@ import net.minecraft.world.phys.AABB;
  */
 public final class FastEntities {
 	public static final boolean ENABLED = !"false".equals(System.getProperty("mcrs.fastEntities"));
+	/** POI search and competitor scan optimizations ({@code -Dmcrs.fastPoi=false} turns them off). */
+	public static final boolean FAST_POI = ENABLED && !"false".equals(System.getProperty("mcrs.fastPoi"));
+	/** Compares every fast POI chunk query with vanilla's ({@code -Dmcrs.fastPoi.verify=true}). */
+	public static final boolean FAST_POI_VERIFY = Boolean.getBoolean("mcrs.fastPoi.verify");
+	public static final java.util.concurrent.atomic.AtomicLong POI_VERIFIED = new java.util.concurrent.atomic.AtomicLong();
+	public static final java.util.concurrent.atomic.AtomicLong POI_MISMATCHED = new java.util.concurrent.atomic.AtomicLong();
 
 	/** Whether entities of this class may answer {@code canBeCollidedWith} with true. */
 	private static final ClassValue<Boolean> MAY_BE_COLLIDED_WITH = new ClassValue<>() {
@@ -60,6 +68,14 @@ public final class FastEntities {
 	public interface Columns {
 		/** Bit mask of the present sections of an unpacked chunk column, or -1 when unknown. */
 		long mcrs$presentSections(long chunkKey);
+
+		/** The stored section at a section key ({@code storage.get}); null if not stored. */
+		java.util.Optional<?> mcrs$storedSection(long sectionKey);
+
+		int mcrs$minSectionY();
+
+		/** Vanilla's {@code getOrLoad}, for verification. */
+		Optional<?> mcrs$getOrLoad(long sectionKey);
 	}
 
 	/** Whether {@link #collidingEntities} may answer for this moving entity. */

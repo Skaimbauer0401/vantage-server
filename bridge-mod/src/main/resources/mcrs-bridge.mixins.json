@@ -24,6 +24,7 @@
 		"ExperienceMergeRadiusMixin",
 		"EntitySectionLookupMixin",
 		"EntitySectionMixin",
+		"PoiCompetitorScanMixin",
 		"PoiManagerColumnsMixin",
 		"SectionStorageColumnsMixin",
 		"HeightmapTimingMixin",

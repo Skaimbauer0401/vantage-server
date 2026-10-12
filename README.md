@@ -22,8 +22,12 @@ Krypton). Factors: how much faster than Java vanilla. Vantage columns without bu
 | trading hall, 1000 boxed villagers, ms/tick | 40.3 | 20.9 (1.92x) | 43.1 (0.93x) | 28.1 (1.43x) | 14.0 (2.88x) |
 | crop farm, fast random ticks, ms/tick | 1.2 | 1.3 (0.98x) | 1.3 (0.96x) | 1.5 (0.84x) | 1.3 (0.92x) |
 
-With the mods bundled in the downloads (Lithium in balanced and performance), performance
-measures 8.4 ms in the trading hall and 0.87 ms with the hoppers. Mobs right next to players
+Since this table, Vantage Vanilla runs the villager POI search and job site competitor scan
+without streams (exact; 1.4M POI queries verified): trading hall 46.1 ms (Java vanilla) vs
+27.2 ms in the same session. With the mods bundled in the downloads (Lithium in balanced and
+performance), performance measures 8.4 ms in the trading hall and 0.87 ms with the hoppers.
+The trading hall is not deterministic in vanilla itself (two vanilla runs part at tick 46), so
+it is verified with the in-process check `-Dmcrs.fastPoi.verify=true` instead of tick hashes. Mobs right next to players
 gain nothing more from Balanced and Performance: their mob changes only act on mobs away from
 players. (Balanced redstone was re-measured; another app disturbed its first run.)
 

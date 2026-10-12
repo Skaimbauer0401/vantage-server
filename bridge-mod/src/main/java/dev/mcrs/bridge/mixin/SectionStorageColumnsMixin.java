@@ -49,6 +49,24 @@ public abstract class SectionStorageColumnsMixin implements FastEntities.Columns
 		return mcrs$columns.get(chunkKey);
 	}
 
+	@Override
+	public Optional<?> mcrs$storedSection(long sectionKey) {
+		return storage.get(sectionKey);
+	}
+
+	@Shadow
+	protected abstract Optional<?> getOrLoad(long sectionKey);
+
+	@Override
+	public Optional<?> mcrs$getOrLoad(long sectionKey) {
+		return getOrLoad(sectionKey);
+	}
+
+	@Override
+	public int mcrs$minSectionY() {
+		return levelHeightAccessor.getMinSectionY();
+	}
+
 	@Unique
 	private boolean mcrs$trackable() {
 		return FastEntities.ENABLED && levelHeightAccessor.getSectionsCount() <= 63;

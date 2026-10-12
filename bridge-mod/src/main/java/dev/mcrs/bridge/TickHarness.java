@@ -247,6 +247,10 @@ public final class TickHarness {
 					nanos.length, mean, sorted[sorted.length / 2] / 1e6, sorted[(int) (sorted.length * 0.95)] / 1e6,
 					hash ? String.format(Locale.ROOT, ", state hash %016x", combined) : "");
 			report(source, summary);
+			if (FastEntities.FAST_POI_VERIFY) {
+				report(source, String.format(Locale.ROOT, "[harness] fast POI verify: %d chunk queries identical, %d differ", FastEntities.POI_VERIFIED.get(),
+						FastEntities.POI_MISMATCHED.get()));
+			}
 			if (hash) {
 				Path file = Path.of("harness-" + scenario + ".txt");
 				try (Writer out = Files.newBufferedWriter(file, StandardCharsets.UTF_8)) {

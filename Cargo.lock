@@ -469,7 +469,7 @@ dependencies = [
 
 [[package]]
 name = "mcrs"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "mcrs-jvm",
@@ -482,7 +482,7 @@ dependencies = [
 
 [[package]]
 name = "mcrs-chunk"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "flate2",
  "libdeflater",
@@ -493,7 +493,7 @@ dependencies = [
 
 [[package]]
 name = "mcrs-jvm"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "jni",
@@ -507,7 +507,7 @@ dependencies = [
 
 [[package]]
 name = "mcrs-worldgen"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "backtrace",
  "md-5",
